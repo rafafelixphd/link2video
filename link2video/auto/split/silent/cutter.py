@@ -33,7 +33,14 @@ class SegmentCutter:
             metadata_gen: MetadataGenerator instance for writing metadata
             num_threads: Number of worker threads (default: 2)
             min_segment: Minimum segment duration in seconds (default: 3.0)
+
+        Raises:
+            FileNotFoundError: If input_file does not exist
         """
+        # Validate input file exists
+        if not os.path.isfile(input_file):
+            raise FileNotFoundError(f"Input file not found: {input_file}")
+
         self.input_file = input_file
         self.output_dir = output_dir
         self.namespace = namespace
@@ -43,6 +50,9 @@ class SegmentCutter:
 
         # Create namespace directory path
         self.namespace_dir = os.path.join(output_dir, namespace)
+
+        # Ensure output directory exists
+        os.makedirs(self.namespace_dir, exist_ok=True)
 
         # Get file extension from input file
         self.file_extension = os.path.splitext(input_file)[1] or '.mp4'
@@ -64,15 +74,13 @@ class SegmentCutter:
         Returns:
             True if successful, False otherwise
         """
-        # Create namespace directory if needed
-        os.makedirs(self.namespace_dir, exist_ok=True)
-
         # Build output filename and metadata path
         segment_name = f"segment_{segment_id:03d}"
         output_path = os.path.join(self.namespace_dir, f"{segment_name}{self.file_extension}")
         metadata_path = os.path.join(self.namespace_dir, f"{segment_name}.yaml")
 
         # Build ffmpeg command with stream copy (no re-encoding)
+        # NOTE: -y flag MUST come before output path for correct behavior
         ffmpeg_cmd = [
             'ffmpeg',
             '-i', self.input_file,
@@ -80,32 +88,38 @@ class SegmentCutter:
             '-to', str(end),
             '-c', 'copy',
             '-avoid_negative_ts', 'make_zero',
+            '-y',  # Overwrite output file without prompting
             output_path,
-            '-y'
         ]
 
         try:
             # Run ffmpeg with suppressed output
-            result = subprocess.run(
+            subprocess.run(
                 ffmpeg_cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 check=True
             )
 
-            # Call metadata generator to write metadata
-            self.metadata_gen.write_metadata(
-                segment_id=segment_id,
-                original_file=self.input_file,
-                start=start,
-                end=end,
-                output_path=metadata_path,
-            )
+            # Write metadata file with error handling
+            try:
+                self.metadata_gen.write_metadata(
+                    segment_id=segment_id,
+                    original_file=self.input_file,
+                    start=start,
+                    end=end,
+                    output_path=metadata_path,
+                )
+            except Exception as e:
+                print(f"  ERROR: Segment {segment_id} metadata write failed: {e}", file=sys.stderr)
+                return False
 
             return True
         except subprocess.CalledProcessError as e:
+            print(f"  ERROR: Segment {segment_id} cutting failed: {e.stderr.decode() if e.stderr else str(e)}", file=sys.stderr)
             return False
         except Exception as e:
+            print(f"  ERROR: Segment {segment_id} processing failed: {e}", file=sys.stderr)
             return False
 
     def _worker(self, job_queue: queue.Queue) -> None:
@@ -118,31 +132,50 @@ class SegmentCutter:
         Args:
             job_queue: Queue containing jobs to process
         """
-        while True:
-            job = job_queue.get()
+        try:
+            while True:
+                job = job_queue.get()
 
-            # Check for sentinel value
-            if job is None:
-                break
+                # Check for sentinel value
+                if job is None:
+                    break
 
-            segment_id, start, end = job
+                segment_id, start, end = job
 
-            # Cut the segment
-            success = self._cut_segment(segment_id, start, end)
+                # Cut the segment
+                success = self._cut_segment(segment_id, start, end)
 
-            # Update progress with thread-safe lock
-            with self.lock:
-                self.segments_cut += 1
-                status = '✓' if success else '✗'
-                print(f"  [{self.segments_cut}/{self.total_segments}] Cutting segment_{segment_id:03d}.mp4... {status}")
+                # Update progress with thread-safe lock
+                with self.lock:
+                    self.segments_cut += 1
+                    status = '✓' if success else '✗'
+                    print(f"  [{self.segments_cut}/{self.total_segments}] Cutting segment_{segment_id:03d}.mp4... {status}")
+        except Exception as e:
+            print(f"  ERROR: Worker thread crashed: {e}", file=sys.stderr)
 
-    def cut_segments(self, segments: list) -> None:
+    def cut_segments(self, segments: list) -> int:
         """
         Cut all video segments using worker threads.
 
         Args:
             segments: List of (start, end) tuples representing segment boundaries
+
+        Returns:
+            Number of successfully cut segments
+
+        Raises:
+            ValueError: If segments list is empty or contains invalid boundaries
         """
+        # Validate segments list is not empty
+        if not segments:
+            print("WARNING: No segments to cut", file=sys.stderr)
+            return 0
+
+        # Validate segment boundaries (start < end)
+        for i, (start, end) in enumerate(segments):
+            if start >= end:
+                raise ValueError(f"Invalid segment {i}: start ({start}) >= end ({end})")
+
         # Set total segments count
         self.total_segments = len(segments)
         self.segments_cut = 0
@@ -172,6 +205,8 @@ class SegmentCutter:
         for _ in range(self.num_threads):
             job_queue.put(None)
 
-        # Wait for all workers to complete
+        # Wait for all workers to complete with timeout (600 seconds = 10 minutes)
         for worker in workers:
-            worker.join()
+            worker.join(timeout=600)
+
+        return self.segments_cut
