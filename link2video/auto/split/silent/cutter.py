@@ -148,8 +148,12 @@ class SegmentCutter:
                 # Update progress with thread-safe lock
                 with self.lock:
                     self.segments_cut += 1
+                    segments_cut = self.segments_cut
+                    total = self.total_segments
                     status = '✓' if success else '✗'
-                    print(f"  [{self.segments_cut}/{self.total_segments}] Cutting segment_{segment_id:03d}.mp4... {status}")
+                    segment_id_str = f"{segment_id:03d}"
+
+                print(f"  [{segments_cut}/{total}] Cutting segment_{segment_id_str}.mp4... {status}")
         except Exception as e:
             print(f"  ERROR: Worker thread crashed: {e}", file=sys.stderr)
 
