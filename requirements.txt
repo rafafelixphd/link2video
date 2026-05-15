@@ -1,0 +1,6 @@
+instaloader
+Gooey
+yt-dlp
+PyYAML
+pytest
+colored==1.4.4
