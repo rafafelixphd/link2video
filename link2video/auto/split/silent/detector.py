@@ -125,8 +125,14 @@ class SilenceDetector:
             # Ensure process is properly cleaned up
             if process is not None:
                 try:
-                    process.wait()
-                except Exception:
+                    process.wait(timeout=60)
+                except subprocess.TimeoutExpired:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                except:
                     pass
 
             # Always push SENTINEL to signal completion
