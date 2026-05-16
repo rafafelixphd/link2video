@@ -278,22 +278,23 @@ class JobManager:
             file_info["error"] = f"Cannot create output dir: {str(e)}"
             return
 
-        # Build command
-        cmd = [
-            "python", "-m", "link2video.__main__",
-            "--auto", "segment",
-            input_file,
-            "--namespace", namespace,
-            "--output-dir", output_dir,
-            "--threshold", params["threshold"],
-            "--quiet-for", str(params["quiet_for"]),
-            "--padding", str(params["padding"]),
-            "--threads", str(params["threads"]),
-            "--skip-shorter", str(params["skip_shorter"]),
-        ]
+        # Create config file for worker script
+        config = {
+            "input_file": input_file,
+            "output_dir": output_dir,
+            "namespace": namespace,
+            "parameters": params,
+            "dry_run": job["global_parameters"].get("dry_run", False),
+        }
+        config_file = self.jobs_dir / f"{job['id']}_config.json"
+        with open(config_file, "w") as f:
+            json.dump(config, f)
 
-        if job["global_parameters"].get("dry_run", False):
-            cmd.append("--dry-run")
+        # Build command to call worker script
+        cmd = [
+            "python", "app/worker.py",
+            str(config_file),
+        ]
 
         try:
             # Create log file for this subprocess
