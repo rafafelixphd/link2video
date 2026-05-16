@@ -21,7 +21,7 @@ class SegmentCutter:
         namespace: str,
         metadata_gen: 'MetadataGenerator',
         num_threads: int = 2,
-        min_segment: float = 3.0
+        skip_shorter: float = 3.0
     ):
         """
         Initialize the SegmentCutter.
@@ -32,7 +32,7 @@ class SegmentCutter:
             namespace: Namespace/folder name for segments
             metadata_gen: MetadataGenerator instance for writing metadata
             num_threads: Number of worker threads (default: 2)
-            min_segment: Minimum segment duration in seconds (default: 3.0)
+            skip_shorter: Minimum segment duration in seconds (default: 3.0)
 
         Raises:
             FileNotFoundError: If input_file does not exist
@@ -46,7 +46,7 @@ class SegmentCutter:
         self.namespace = namespace
         self.metadata_gen = metadata_gen
         self.num_threads = num_threads
-        self.min_segment = min_segment
+        self.skip_shorter = skip_shorter
 
         # Create namespace directory path
         self.namespace_dir = os.path.join(output_dir, namespace)

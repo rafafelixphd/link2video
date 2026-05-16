@@ -47,11 +47,11 @@ def _handle_silence_split(args):
             input_file=args.input,
             output_dir=args.output_dir,
             namespace=args.namespace,
-            noise=args.noise,
-            silence_duration=args.silence_duration,
+            threshold=args.threshold,
+            quiet_for=args.quiet_for,
             padding=args.padding,
             threads=args.threads,
-            min_segment=args.min_segment,
+            skip_shorter=args.skip_shorter,
             dry_run=args.dry_run,
         )
 
@@ -240,7 +240,7 @@ def main():
 
         # silence-split subcommand with all parameters
         silence_split = subparsers.add_parser(
-            "silence-split",
+            "segment",
             help="Split video at silent gaps"
         )
         silence_split.add_argument(
@@ -258,12 +258,12 @@ def main():
             help="Root directory for output segments (default: segments)"
         )
         silence_split.add_argument(
-            "--noise",
+            "--threshold",
             default="-10dB",
             help="Silence detection threshold in dB. Lower (more negative) values detect quieter silences. Increase this to ignore background noise (default: -10dB)"
         )
         silence_split.add_argument(
-            "--silence-duration",
+            "--quiet-for",
             type=float,
             default=3.5,
             help="Minimum duration of silence in seconds to count as a split point. Increase this to ignore brief pauses within sentences like breathing or hesitation (default: 3.5)"
@@ -281,9 +281,9 @@ def main():
             help="Number of parallel worker threads for cutting segments. Increase on high-performance systems for faster processing (default: 2)"
         )
         silence_split.add_argument(
-            "--min-segment",
+            "--skip-shorter",
             type=float,
-            default=3.0,
+            default=1.5,
             help="Minimum segment duration in seconds. Shorter segments are automatically discarded. Increase this to ensure meaningful content in each segment (default: 3.0)"
         )
         silence_split.add_argument(
@@ -369,7 +369,7 @@ def main():
         args = parser.parse_args(cli_argv[1:])
 
         # Route to handler
-        if args.auto_command == "silence-split":
+        if args.auto_command == "segment":
             _handle_silence_split(args)
         elif args.auto_command == "extract-audio":
             _handle_extract_audio(args)

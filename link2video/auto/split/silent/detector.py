@@ -15,7 +15,7 @@ class SilenceDetector:
     def __init__(
         self,
         input_file: str,
-        noise: str = "-10dB",
+        threshold: str = "-10dB",
         duration: float = 3.5,
         padding: float = 1.0
     ):
@@ -24,7 +24,7 @@ class SilenceDetector:
 
         Args:
             input_file: Path to the input audio/video file.
-            noise: Silence detection threshold (default "-10dB").
+            threshold: Silence detection threshold (default "-10dB").
             duration: Minimum silence duration in seconds (default 3.5).
             padding: Padding to apply around silences in seconds (default 1.0).
 
@@ -45,7 +45,7 @@ class SilenceDetector:
             raise ValueError(f"padding must be non-negative, got {padding}")
 
         self.input_file = input_file
-        self.noise = noise
+        self.threshold = threshold
         self.duration = duration
         self.padding = padding
 
@@ -67,7 +67,7 @@ class SilenceDetector:
         cmd = [
             "ffmpeg",
             "-i", self.input_file,
-            "-af", f"silencedetect=n={self.noise}:d={self.duration}",
+            "-af", f"silencedetect=n={self.threshold}:d={self.duration}",
             "-f", "null",
             "-"
         ]

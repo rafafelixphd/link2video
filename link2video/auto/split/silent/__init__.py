@@ -28,11 +28,11 @@ class SilenceSplitter(SplitProcessor):
         input_file: str,
         output_dir: str,
         namespace: str,
-        noise: str = "-10dB",
-        silence_duration: float = 3.5,
+        threshold: str = "-10dB",
+        quiet_for: float = 3.5,
         padding: float = 1.0,
         threads: int = 2,
-        min_segment: float = 3.0,
+        skip_shorter: float = 3.0,
         dry_run: bool = False
     ) -> List[Segment]:
         """
@@ -50,24 +50,24 @@ class SilenceSplitter(SplitProcessor):
             input_file: Path to input video file.
             output_dir: Root output directory for namespace folders.
             namespace: Folder name and prefix for outputs (e.g., "video_1").
-            noise: Silence detection threshold (default: "-10dB").
-            silence_duration: Minimum silence duration to split on (default: 3.5s).
+            threshold: Silence detection threshold (default: "-10dB").
+            quiet_for: Minimum silence duration to split on (default: 3.5s).
             padding: Padding around silence boundaries (default: 1.0s).
             threads: Number of worker threads for cutting (default: 2).
-            min_segment: Minimum segment duration to keep (default: 3.0s).
+            skip_shorter: Minimum segment duration to keep (default: 3.0s).
             dry_run: If True, only detect silences without cutting (default: False).
 
         Returns:
             List of Segment objects representing split video parts.
         """
         # Print detection header
-        print(f"Detecting silences (threshold={noise}, min gap={silence_duration}s)...\n")
+        print(f"Detecting silences (threshold={threshold}, min gap={quiet_for}s)...\n")
 
         # Create component instances
         detector = SilenceDetector(
             input_file=input_file,
-            noise=noise,
-            duration=silence_duration,
+            threshold=threshold,
+            duration=quiet_for,
             padding=padding
         )
         metadata_gen = MetadataGenerator(input_file=input_file)
@@ -77,7 +77,7 @@ class SilenceSplitter(SplitProcessor):
             namespace=namespace,
             metadata_gen=metadata_gen,
             num_threads=threads,
-            min_segment=min_segment
+            skip_shorter=skip_shorter
         )
 
         # Create queue for silence pairs (producer → consumer)
@@ -120,7 +120,7 @@ class SilenceSplitter(SplitProcessor):
             length = segment_end - prev_end
 
             # Check if segment meets minimum length requirement
-            if length >= min_segment:
+            if length >= skip_shorter:
                 segment_id += 1
                 segments.append((segment_id, prev_end, segment_end))
                 print(
@@ -133,7 +133,7 @@ class SilenceSplitter(SplitProcessor):
                 # Skip segment that's too short
                 print(
                     f"Skipping {prev_end:.2f}s → {segment_end:.2f}s "
-                    f"({length:.1f}s < {min_segment}s)"
+                    f"({length:.1f}s < {skip_shorter}s)"
                 )
                 # Still advance past this silence
                 prev_end = cut_after
