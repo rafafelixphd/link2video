@@ -21,7 +21,7 @@ class SegmentCutter:
         namespace: str,
         metadata_gen: 'MetadataGenerator',
         num_threads: int = 2,
-        min_segment: float = 3.0
+        skip_shorter: float = 3.0
     ):
         """
         Initialize the SegmentCutter.
@@ -32,7 +32,7 @@ class SegmentCutter:
             namespace: Namespace/folder name for segments
             metadata_gen: MetadataGenerator instance for writing metadata
             num_threads: Number of worker threads (default: 2)
-            min_segment: Minimum segment duration in seconds (default: 3.0)
+            skip_shorter: Minimum segment duration in seconds (default: 3.0)
 
         Raises:
             FileNotFoundError: If input_file does not exist
@@ -46,7 +46,7 @@ class SegmentCutter:
         self.namespace = namespace
         self.metadata_gen = metadata_gen
         self.num_threads = num_threads
-        self.min_segment = min_segment
+        self.skip_shorter = skip_shorter
 
         # Create namespace directory path
         self.namespace_dir = os.path.join(output_dir, namespace)
@@ -150,12 +150,6 @@ class SegmentCutter:
                     self.segments_cut += 1
                     status = '✓' if success else '✗'
                     print(f"  [{self.segments_cut}/{self.total_segments}] Cutting segment_{segment_id:03d}.mp4... {status}")
-                    segments_cut = self.segments_cut
-                    total = self.total_segments
-                    status = '✓' if success else '✗'
-                    segment_id_str = f"{segment_id:03d}"
-
-                print(f"  [{segments_cut}/{total}] Cutting segment_{segment_id_str}.mp4... {status}")
         except Exception as e:
             print(f"  ERROR: Worker thread crashed: {e}", file=sys.stderr)
 
@@ -164,7 +158,7 @@ class SegmentCutter:
         Cut all video segments using worker threads.
 
         Args:
-            segments: List of (start, end) tuples representing segment boundaries
+            segments: List of (segment_id, start, end) tuples representing pre-numbered segment boundaries
 
         Returns:
             Number of successfully cut segments
@@ -178,9 +172,9 @@ class SegmentCutter:
             return 0
 
         # Validate segment boundaries (start < end)
-        for i, (start, end) in enumerate(segments):
+        for i, (segment_id, start, end) in enumerate(segments):
             if start >= end:
-                raise ValueError(f"Invalid segment {i}: start ({start}) >= end ({end})")
+                raise ValueError(f"Invalid segment {segment_id}: start ({start}) >= end ({end})")
 
         # Set total segments count
         self.total_segments = len(segments)
@@ -203,8 +197,8 @@ class SegmentCutter:
             worker.start()
             workers.append(worker)
 
-        # Queue all jobs with segment numbering starting from 1
-        for segment_id, (start, end) in enumerate(segments, start=1):
+        # Queue all jobs with pre-assigned segment IDs
+        for segment_id, start, end in segments:
             job_queue.put((segment_id, start, end))
 
         # Send sentinel to each worker to signal completion

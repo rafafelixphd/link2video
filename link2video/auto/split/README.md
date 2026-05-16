@@ -36,7 +36,7 @@ link2video --auto silence-split <input_file> \
 | `--output-dir`       | `segments` | Root directory for output folders                                 |
 | `--noise`            | `-10dB`    | Silence detection threshold (lower = more sensitive)              |
 | `--silence-duration` | `3.5`      | Min silence length in seconds to trigger split                    |
-| `--padding`          | `1.0`      | Buffer zone around silence boundaries (prevents cutting mid-word) |
+| `--padding`          | `1.0`      | Seconds of silence content to retain at segment boundaries (extends segments into silence windows) |
 | `--threads`          | `2`        | Parallel worker threads for cutting segments                      |
 | `--min-segment`      | `3.0`      | Minimum segment duration in seconds (shorter ones discarded)      |
 | `--dry-run`          | —          | Preview segments without creating files                           |
@@ -94,6 +94,21 @@ start_frame: 0
 end_frame: 936
 ```
 
+## Padding Strategy
+
+The `--padding` parameter controls how much of detected silences to include in adjacent segments:
+
+- **Segment End:** Extended into silence by `padding` seconds (e.g., silence detected at 10s, padding=1s → segment ends at 11s)
+- **Next Segment Start:** Begins `padding` seconds before silence ends (e.g., silence ends at 15s, padding=1s → next segment starts at 14s)
+- **Result:** Segments overlap within silence windows using actual video content; no artificial black frames
+
+**Example:** Video with silence from 35s to 50s, padding=1.0s:
+- Previous segment extends to: 35 + 1.0 = 36s
+- Next segment starts at: 50 - 1.0 = 49s
+- No gap; segments contain real silence content for context
+
+**Tuning:** Increase `--padding` if you want more silence context in segments; decrease to minimize overlap.
+
 ## Tuning Parameters
 
 **Getting too many short segments?**
@@ -103,7 +118,7 @@ end_frame: 936
 
 **Speech being cut off at edges?**
 
-- Increase `--padding` (e.g., 1.5 or 2.0)
+- Increase `--padding` (e.g., 1.5 or 2.0) to include more silence context in segments
 
 **Detecting background noise as silence?**
 
