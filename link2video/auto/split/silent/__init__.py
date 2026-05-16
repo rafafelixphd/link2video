@@ -115,25 +115,28 @@ class SilenceSplitter(SplitProcessor):
             cut_before, cut_after = item
 
             # Calculate segment length (from prev_end to cut_before)
-            length = cut_before - prev_end
+            # Segment extends into silence by padding seconds
+            segment_end = cut_before
+            length = segment_end - prev_end
 
             # Check if segment meets minimum length requirement
             if length >= min_segment:
                 segment_id += 1
-                segments.append((segment_id, prev_end, cut_before))
+                segments.append((segment_id, prev_end, segment_end))
                 print(
-                    f"Segment {segment_id}: {prev_end:.2f}s → {cut_before:.2f}s "
+                    f"Segment {segment_id}: {prev_end:.2f}s → {segment_end:.2f}s "
                     f"({length:.1f}s)"
                 )
+                # Start next segment at same point to overlap in silence region (no black padding)
+                prev_end = cut_before
             else:
                 # Skip segment that's too short
                 print(
-                    f"Skipping {prev_end:.2f}s → {cut_before:.2f}s "
+                    f"Skipping {prev_end:.2f}s → {segment_end:.2f}s "
                     f"({length:.1f}s < {min_segment}s)"
                 )
-
-            # Move past this silence
-            prev_end = cut_after
+                # Still advance past this silence
+                prev_end = cut_after
 
         # Wait for detector thread to finish
         detector_thread.join(timeout=30)
