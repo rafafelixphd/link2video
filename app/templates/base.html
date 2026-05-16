@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Batch Processor</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .header { padding: 20px; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center; }
+        .title { font-size: 24px; font-weight: bold; }
+        .refresh-btn { padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .tabs { display: flex; border-bottom: 1px solid #e0e0e0; }
+        .tab { padding: 12px 24px; cursor: pointer; border: none; background: none; font-size: 14px; color: #666; border-bottom: 3px solid transparent; }
+        .tab.active { color: #007bff; border-bottom-color: #007bff; }
+        .tab:hover { background: #f9f9f9; }
+        .tab-content { display: none; padding: 20px; }
+        .tab-content.active { display: block; }
+        .tab-placeholder { padding: 40px; text-align: center; color: #999; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e0e0e0; }
+        th { background: #f9f9f9; font-weight: 600; }
+        td input { width: 100%; padding: 4px; border: 1px solid #ddd; border-radius: 4px; }
+        button { padding: 8px 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; }
+        button:hover { background: #0056b3; }
+        button.danger { background: #dc3545; }
+        button.danger:hover { background: #c82333; }
+        .progress-bar { width: 100%; height: 20px; background: #e0e0e0; border-radius: 4px; overflow: hidden; }
+        .progress-fill { height: 100%; background: #28a745; width: 0%; }
+        .status-badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+        .status-pending { background: #ffc107; color: #333; }
+        .status-running { background: #17a2b8; color: white; }
+        .status-complete { background: #28a745; color: white; }
+        .status-failed { background: #dc3545; color: white; }
+        .status-cancelled { background: #6c757d; color: white; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="title">Batch Processor</div>
+            <button class="refresh-btn" onclick="location.reload()">Refresh</button>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('segment')">Segment</button>
+            <button class="tab" onclick="switchTab('extract-audio')">Extract Audio</button>
+            <button class="tab" onclick="switchTab('transcribe')">Transcribe</button>
+        </div>
+
+        <div id="segment" class="tab-content active">
+            {% include "index.html" %}
+        </div>
+
+        <div id="extract-audio" class="tab-content">
+            <div class="tab-placeholder">Extract Audio — Coming soon</div>
+        </div>
+
+        <div id="transcribe" class="tab-content">
+            <div class="tab-placeholder">Transcribe — Coming soon</div>
+        </div>
+    </div>
+
+    <script>
+        function switchTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+
+            // Show selected tab
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        // Poll job status every 2 seconds
+        setInterval(pollJobs, 2000);
+        pollJobs();
+
+        async function pollJobs() {
+            try {
+                const response = await fetch('/api/jobs');
+                const data = await response.json();
+                updateJobsDisplay(data.jobs);
+            } catch (error) {
+                console.error('Polling error:', error);
+            }
+        }
+
+        function updateJobsDisplay(jobs) {
+            // Updated by segment tab
+            window.currentJobs = jobs;
+            if (window.updateJobsTable) {
+                window.updateJobsTable(jobs);
+            }
+        }
+    </script>
+</body>
+</html>
