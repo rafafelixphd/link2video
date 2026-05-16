@@ -53,9 +53,12 @@ class SilenceDetector:
         """
         Run ffmpeg silencedetect filter and push cut points to queue.
 
-        Parses silence_start and silence_end from ffmpeg stderr,
-        applies padding, and pushes (cut_before, cut_after) tuples.
-        Pushes SENTINEL when done.
+        Detects silences and calculates segment boundaries by extending segments
+        into the silence window by `padding` seconds:
+        - cut_before: silence_start + padding (segment extends into silence)
+        - cut_after: silence_end - padding (next segment starts before silence ends)
+
+        This strategy allows segments to include silence context without artificial gaps.
 
         Args:
             q: Queue to push results to.
@@ -99,8 +102,9 @@ class SilenceDetector:
                     try:
                         silence_end = float(end_match.group(1))
 
-                        # Apply padding
+                        # Extend previous segment into silence by `padding` seconds
                         cut_before = current_silence_start + self.padding
+                        # Start next segment `padding` seconds before silence ends
                         cut_after = silence_end - self.padding
 
                         # Check for inverted intervals and skip if necessary

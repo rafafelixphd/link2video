@@ -87,7 +87,7 @@ class SilenceSplitter(SplitProcessor):
         detector_thread = detector.spawn_detector_thread(q)
 
         # Process silence pairs from queue
-        segments = []  # List of (start, end) tuples
+        segments = []  # List of (segment_id, start, end) tuples
         prev_end = 0.0
         segment_id = 0
 
@@ -103,7 +103,7 @@ class SilenceSplitter(SplitProcessor):
                 # Add final segment if there's content after last silence
                 if prev_end < duration:
                     segment_id += 1
-                    segments.append((prev_end, duration))
+                    segments.append((segment_id, prev_end, duration))
                     print(
                         f"Segment {segment_id}: {prev_end:.2f}s → {duration:.2f}s "
                         f"({duration - prev_end:.1f}s)"
@@ -120,7 +120,7 @@ class SilenceSplitter(SplitProcessor):
             # Check if segment meets minimum length requirement
             if length >= min_segment:
                 segment_id += 1
-                segments.append((prev_end, cut_before))
+                segments.append((segment_id, prev_end, cut_before))
                 print(
                     f"Segment {segment_id}: {prev_end:.2f}s → {cut_before:.2f}s "
                     f"({length:.1f}s)"
@@ -145,7 +145,7 @@ class SilenceSplitter(SplitProcessor):
             cutter.cut_segments(segments)
 
             # Build Segment objects from cut results
-            for segment_id, (start, end) in enumerate(segments, start=1):
+            for segment_id, start, end in segments:
                 segment_name = f"segment_{segment_id:03d}"
                 filepath = f"{output_dir}/{namespace}/{segment_name}.mp4"
                 metadata_path = f"{output_dir}/{namespace}/{segment_name}.yaml"
@@ -163,7 +163,7 @@ class SilenceSplitter(SplitProcessor):
             print(f"\nDone — {len(result_segments)} segments saved to {output_dir}/{namespace}/")
         elif segments:
             # Dry-run mode: create Segment objects without cutting
-            for segment_id, (start, end) in enumerate(segments, start=1):
+            for segment_id, start, end in segments:
                 segment_name = f"segment_{segment_id:03d}"
                 filepath = f"{output_dir}/{namespace}/{segment_name}.mp4"
                 metadata_path = f"{output_dir}/{namespace}/{segment_name}.yaml"

@@ -164,7 +164,7 @@ class SegmentCutter:
         Cut all video segments using worker threads.
 
         Args:
-            segments: List of (start, end) tuples representing segment boundaries
+            segments: List of (segment_id, start, end) tuples representing pre-numbered segment boundaries
 
         Returns:
             Number of successfully cut segments
@@ -178,9 +178,9 @@ class SegmentCutter:
             return 0
 
         # Validate segment boundaries (start < end)
-        for i, (start, end) in enumerate(segments):
+        for i, (segment_id, start, end) in enumerate(segments):
             if start >= end:
-                raise ValueError(f"Invalid segment {i}: start ({start}) >= end ({end})")
+                raise ValueError(f"Invalid segment {segment_id}: start ({start}) >= end ({end})")
 
         # Set total segments count
         self.total_segments = len(segments)
@@ -203,8 +203,8 @@ class SegmentCutter:
             worker.start()
             workers.append(worker)
 
-        # Queue all jobs with segment numbering starting from 1
-        for segment_id, (start, end) in enumerate(segments, start=1):
+        # Queue all jobs with pre-assigned segment IDs
+        for segment_id, start, end in segments:
             job_queue.put((segment_id, start, end))
 
         # Send sentinel to each worker to signal completion
