@@ -188,6 +188,24 @@ class JobManager:
         file_info["stdout"] = ""
         file_info["stderr"] = ""
 
+        # Validate input file exists
+        if not os.path.isfile(file_info["input"]):
+            file_info["status"] = "failed"
+            file_info["error"] = f"File not found: {file_info['input']}"
+            self._persist_job(job["id"], job)
+            return
+
+        # Validate output directory
+        output_path = Path(file_info["output_dir"])
+        if not output_path.exists():
+            try:
+                output_path.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                file_info["status"] = "failed"
+                file_info["error"] = f"Cannot create output dir: {str(e)}"
+                self._persist_job(job["id"], job)
+                return
+
         try:
             splitter = SilenceSplitter()
             segments = splitter.split(

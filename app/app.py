@@ -49,9 +49,16 @@ def create_app(jobs_dir: str = "app/.jobs") -> Flask:
         if not data.get("output_dir"):
             return jsonify({"error": "Output directory required"}), 400
 
+        # Validate file paths
+        for f in data["files"]:
+            if not f.get("input"):
+                return jsonify({"error": "File path required for all files"}), 400
+            if not f.get("namespace"):
+                return jsonify({"error": "Namespace required for all files"}), 400
+
         files = data["files"]
         global_params = {
-            "job_concurrency": data.get("job_concurrency", 2),
+            "job_concurrency": min(data.get("job_concurrency", 2), 8),  # Cap at 8
             "dry_run": data.get("dry_run", False),
         }
 
