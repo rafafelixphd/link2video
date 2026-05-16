@@ -131,7 +131,7 @@
                 if (response.ok) {
                     inputFiles = [];
                     renderInputFiles();
-                    pollJobs();
+                    window.pollJobs();
                 } else {
                     alert('Error: ' + result.error);
                 }
@@ -176,7 +176,7 @@
         async function cancelJob(jobId) {
             try {
                 await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
-                pollJobs();
+                window.pollJobs();
             } catch (error) {
                 alert('Error cancelling job: ' + error.message);
             }

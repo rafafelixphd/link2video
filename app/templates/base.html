@@ -77,27 +77,24 @@
             event.target.classList.add('active');
         }
 
-        // Poll job status every 2 seconds
-        setInterval(pollJobs, 2000);
-        pollJobs();
-
-        async function pollJobs() {
+        // Make polling functions available globally
+        window.pollJobs = async function() {
             try {
                 const response = await fetch('/api/jobs');
                 const data = await response.json();
-                updateJobsDisplay(data.jobs);
+                if (window.updateJobsTable) {
+                    window.updateJobsTable(data.jobs);
+                }
             } catch (error) {
                 console.error('Polling error:', error);
             }
-        }
+        };
 
-        function updateJobsDisplay(jobs) {
-            // Updated by segment tab
-            window.currentJobs = jobs;
-            if (window.updateJobsTable) {
-                window.updateJobsTable(jobs);
-            }
-        }
+        // Start polling after all scripts load
+        window.addEventListener('load', function() {
+            window.pollJobs();
+            setInterval(window.pollJobs, 2000);
+        });
     </script>
 </body>
 </html>
