@@ -12,7 +12,7 @@ import json
 import os
 from flask import Flask, render_template, request, jsonify
 from pathlib import Path
-from job_manager import JobManager
+from .job_manager import JobManager
 
 
 def create_app(jobs_dir: str = "app/.jobs") -> Flask:
