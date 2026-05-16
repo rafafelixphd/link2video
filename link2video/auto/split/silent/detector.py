@@ -66,10 +66,15 @@ class SilenceDetector:
         # Build ffmpeg command with silencedetect filter
         cmd = [
             "ffmpeg",
-            "-i", self.input_file,
-            "-af", f"silencedetect=n={self.threshold}:d={self.duration}",
-            "-f", "null",
-            "-"
+            "-vn",  # 1. Disable video for maximum processing speed
+            "-i",
+            self.input_file,
+            # 2. dynaudnorm dynamically normalizes the audio before checking for silence
+            "-af",
+            f"dynaudnorm=f=150:g=15,silencedetect=n={self.threshold}:d={self.duration}",
+            "-f",
+            "null",
+            "-",
         ]
 
         process = None

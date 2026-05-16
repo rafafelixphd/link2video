@@ -35,6 +35,9 @@ class SilenceSplitter(SplitProcessor):
         skip_shorter: float = 3.0,
         dry_run: bool = False
     ) -> List[Segment]:
+
+        # Store padding for diagnostic output
+        self._padding = padding
         """
         Split a video into segments based on silence detection.
 
@@ -86,57 +89,114 @@ class SilenceSplitter(SplitProcessor):
         # Spawn detector thread
         detector_thread = detector.spawn_detector_thread(q)
 
-        # Process silence pairs from queue
-        segments = []  # List of (segment_id, start, end) tuples
-        prev_end = 0.0
-        segment_id = 0
-
+        # Collect all silence pairs from queue (sliding window uses them all at once)
+        silences = []
         while True:
-            # Get next item from queue (silence pair or SENTINEL)
             item = q.get()
-
-            # Check for SENTINEL (end of detection)
             if item is None:
-                # Get video duration and add final segment
-                duration = self._get_video_duration(input_file)
-
-                # Add final segment if there's content after last silence
-                if prev_end < duration:
-                    segment_id += 1
-                    segments.append((segment_id, prev_end, duration))
-                    print(
-                        f"Segment {segment_id}: {prev_end:.2f}s → {duration:.2f}s "
-                        f"({duration - prev_end:.1f}s)"
-                    )
-
                 break
+            silences.append(item)
 
-            # Unpack silence boundaries
-            cut_before, cut_after = item
+        # Get video duration for final segment handling
+        duration = self._get_video_duration(input_file)
 
-            # Calculate segment length (from prev_end to cut_before)
-            # Segment extends into silence by padding seconds
-            segment_end = cut_before
-            length = segment_end - prev_end
+        # Sliding window: process segments between silences
+        # Store: (segment_id, save_start, save_end) for cutter
+        # Also track audio boundaries for diagnostics
+        segments = []
+        segment_info = []  # For diagnostic output
+        segment_id = 0
+        current_pos = 0.0
+
+        for silence_start, silence_end in silences:
+            # Segment: from current position to where silence starts
+            audio_start = current_pos
+            audio_end = silence_start
+            audio_duration = audio_end - audio_start
 
             # Check if segment meets minimum length requirement
-            if length >= skip_shorter:
+            if audio_duration >= skip_shorter:
                 segment_id += 1
-                segments.append((segment_id, prev_end, segment_end))
+
+                # Calculate save boundaries with padding
+                save_start = max(audio_start - padding, 0.0)
+                save_end = min(audio_end + padding, duration)
+                save_duration = save_end - save_start
+
+                # Store for cutter (with padding applied)
+                segments.append((segment_id, save_start, save_end))
+                segment_info.append({
+                    'id': segment_id,
+                    'audio_start': audio_start,
+                    'audio_end': audio_end,
+                    'audio_duration': audio_duration,
+                    'save_start': save_start,
+                    'save_end': save_end,
+                    'save_duration': save_duration,
+                    'padding': padding
+                })
+
+                segment_name = f"segment_{segment_id:03d}"
                 print(
-                    f"Segment {segment_id}: {prev_end:.2f}s → {segment_end:.2f}s "
-                    f"({length:.1f}s)"
+                    f"[AUDIO] {segment_name}: Start at: {audio_start:.2f}s - End at: {audio_end:.2f}s ({audio_duration:.2f}s audio)"
                 )
-                # Start next segment at same point to overlap in silence region (no black padding)
-                prev_end = cut_before
+                print(
+                    f"  Saving with padding ({padding:.1f}s): {save_start:.2f}s to {save_end:.2f}s ({save_duration:.2f}s total) - saving to: {segment_name}.mp4"
+                )
             else:
                 # Skip segment that's too short
                 print(
-                    f"Skipping {prev_end:.2f}s → {segment_end:.2f}s "
-                    f"({length:.1f}s < {skip_shorter}s)"
+                    f"[AUDIO] Skipping: Start at: {audio_start:.2f}s - End at: {audio_end:.2f}s "
+                    f"({audio_duration:.2f}s < {skip_shorter}s minimum)"
                 )
-                # Still advance past this silence
-                prev_end = cut_after
+
+            # Print the silence period (not saved)
+            print(
+                f"[SILENCE] Start at: {silence_start:.2f}s - End at: {silence_end:.2f}s ({silence_end - silence_start:.2f}s) - REMOVED (not saved)"
+            )
+
+            # Move past this silence
+            current_pos = silence_end
+
+        # Handle final segment (after last silence)
+        if current_pos < duration:
+            audio_start = current_pos
+            audio_end = duration
+            audio_duration = audio_end - audio_start
+
+            if audio_duration >= skip_shorter:
+                segment_id += 1
+
+                # Calculate save boundaries with padding (no padding after final end)
+                save_start = max(audio_start - padding, 0.0)
+                save_end = duration
+                save_duration = save_end - save_start
+
+                # Store for cutter (with padding applied)
+                segments.append((segment_id, save_start, save_end))
+                segment_info.append({
+                    'id': segment_id,
+                    'audio_start': audio_start,
+                    'audio_end': audio_end,
+                    'audio_duration': audio_duration,
+                    'save_start': save_start,
+                    'save_end': save_end,
+                    'save_duration': save_duration,
+                    'padding': padding
+                })
+
+                segment_name = f"segment_{segment_id:03d}"
+                print(
+                    f"[AUDIO] {segment_name}: Start at: {audio_start:.2f}s - End at: {audio_end:.2f}s ({audio_duration:.2f}s audio)"
+                )
+                print(
+                    f"  Saving with padding ({padding:.1f}s): {save_start:.2f}s to {save_end:.2f}s ({save_duration:.2f}s total) - saving to: {segment_name}.mp4"
+                )
+            else:
+                print(
+                    f"[AUDIO] Skipping: Start at: {audio_start:.2f}s - End at: {audio_end:.2f}s "
+                    f"({audio_duration:.2f}s < {skip_shorter}s minimum)"
+                )
 
         # Wait for detector thread to finish
         detector_thread.join(timeout=30)

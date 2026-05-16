@@ -26,6 +26,25 @@ from .auto.extract_audio import ExtractAudioProcessor
 from .auto.transcribe import TranscribeProcessor
 
 
+def normalize_threshold(value: str) -> str:
+    """
+    Normalize threshold to always end with 'dB'.
+
+    Examples:
+        "-10" → "-10dB"
+        "-10dB" → "-10dB"
+        "-10DB" → "-10dB"
+    """
+    value = value.strip()
+    if not value.upper().endswith("DB"):
+        value += "dB"
+    else:
+        # Ensure lowercase 'dB'
+        if value.endswith("DB"):
+            value = value[:-2] + "dB"
+    return value
+
+
 def _handle_silence_split(args):
     """
     Handle the --auto silence-split CLI subcommand.
@@ -259,8 +278,9 @@ def main():
         )
         silence_split.add_argument(
             "--threshold",
+            type=normalize_threshold,
             default="-10dB",
-            help="Silence detection threshold in dB. Lower (more negative) values detect quieter silences. Increase this to ignore background noise (default: -10dB)"
+            help="Silence detection threshold in dB. Lower (more negative) values detect quieter silences. Increase this to ignore background noise (default: -35dB)"
         )
         silence_split.add_argument(
             "--quiet-for",
