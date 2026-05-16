@@ -128,6 +128,9 @@ class JobManager:
         # First, update status of all running processes
         self._monitor_running_processes()
 
+        # Recalculate status for all jobs based on file states
+        self._update_all_job_statuses()
+
         # Then spawn new processes if slots available
         self._spawn_pending_files()
 
@@ -179,6 +182,21 @@ class JobManager:
             job["status"] = "running"
         elif any(s == "pending" for s in statuses):
             job["status"] = "pending"
+
+    def _update_all_job_statuses(self) -> None:
+        """Recalculate status for all jobs based on their file states."""
+        for job_file in self.jobs_dir.glob("*.json"):
+            try:
+                with open(job_file) as f:
+                    job = json.load(f)
+
+                if job["status"] in ["completed", "failed", "cancelled"]:
+                    continue
+
+                self._update_job_status(job)
+                self._persist_job(job["id"], job)
+            except (json.JSONDecodeError, KeyError):
+                pass
 
     def _spawn_pending_files(self) -> None:
         """Spawn background processes for pending files."""
