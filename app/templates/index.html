@@ -131,7 +131,7 @@
                 if (response.ok) {
                     inputFiles = [];
                     renderInputFiles();
-                    window.pollJobs();
+                    pollJobs();
                 } else {
                     alert('Error: ' + result.error);
                 }
@@ -176,7 +176,7 @@
         async function cancelJob(jobId) {
             try {
                 await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
-                window.pollJobs();
+                pollJobs();
             } catch (error) {
                 alert('Error cancelling job: ' + error.message);
             }
@@ -186,6 +186,18 @@
             alert('View job: ' + jobId);
         }
 
+        async function pollJobs() {
+            try {
+                const response = await fetch('/api/jobs');
+                const data = await response.json();
+                window.updateJobsTable(data.jobs);
+            } catch (error) {
+                console.error('Polling error:', error);
+            }
+        }
+
         renderInputFiles();
+        pollJobs();
+        setInterval(pollJobs, 2000);
     </script>
 </div>

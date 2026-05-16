@@ -76,25 +76,6 @@
             document.getElementById(tabName).classList.add('active');
             event.target.classList.add('active');
         }
-
-        // Make polling functions available globally
-        window.pollJobs = async function() {
-            try {
-                const response = await fetch('/api/jobs');
-                const data = await response.json();
-                if (window.updateJobsTable) {
-                    window.updateJobsTable(data.jobs);
-                }
-            } catch (error) {
-                console.error('Polling error:', error);
-            }
-        };
-
-        // Start polling after all scripts load
-        window.addEventListener('load', function() {
-            window.pollJobs();
-            setInterval(window.pollJobs, 2000);
-        });
     </script>
 </body>
 </html>
