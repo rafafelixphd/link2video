@@ -1,0 +1,191 @@
+<div style="padding: 20px;">
+    <h3 style="margin-bottom: 20px;">Segment Files</h3>
+
+    <!-- Input Files Section -->
+    <div style="margin-bottom: 30px;">
+        <h4 style="margin-bottom: 10px;">Input Files & Parameters</h4>
+        <div style="margin-bottom: 10px;">
+            <button onclick="addFiles()">+ Add Files</button>
+            <label style="margin-left: 20px;">
+                Output Dir: <input type="text" id="outputDir" placeholder="/path/to/output" style="width: 300px; padding: 6px;">
+            </label>
+            <label style="margin-left: 20px;">
+                Job Concurrency: <input type="number" id="jobConcurrency" value="2" min="1" max="8" style="width: 60px; padding: 6px;">
+            </label>
+            <label style="margin-left: 20px;">
+                <input type="checkbox" id="dryRun"> Dry Run
+            </label>
+            <button onclick="submitJob()" style="margin-left: 20px; background: #28a745;">Process</button>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>File</th>
+                    <th style="width: 100px;">Namespace</th>
+                    <th style="width: 80px;">Threshold</th>
+                    <th style="width: 80px;">Quiet</th>
+                    <th style="width: 70px;">Pad</th>
+                    <th style="width: 70px;">Thread</th>
+                    <th style="width: 80px;">Skip</th>
+                    <th style="width: 50px;">Action</th>
+                </tr>
+            </thead>
+            <tbody id="inputFilesTable">
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Active Jobs Section -->
+    <div>
+        <h4 style="margin-bottom: 10px;">Active Jobs</h4>
+        <table>
+            <thead>
+                <tr>
+                    <th>File</th>
+                    <th style="width: 100px;">Status</th>
+                    <th style="width: 150px;">Progress</th>
+                    <th style="width: 100px;">Segments</th>
+                    <th style="width: 150px;">Action</th>
+                </tr>
+            </thead>
+            <tbody id="jobsTable">
+            </tbody>
+        </table>
+    </div>
+
+    <input type="file" id="fileInput" multiple style="display: none;" onchange="handleFileSelect(event)">
+
+    <script>
+        // State
+        let inputFiles = [];
+
+        function addFiles() {
+            document.getElementById('fileInput').click();
+        }
+
+        function handleFileSelect(event) {
+            const files = Array.from(event.target.files);
+            files.forEach(file => {
+                inputFiles.push({
+                    input: file.path || file.webkitRelativePath || file.name,
+                    namespace: file.name.split('.')[0],
+                    output_dir: document.getElementById('outputDir').value,
+                    parameters: {
+                        threshold: '-10dB',
+                        quiet_for: 3.5,
+                        padding: 1.0,
+                        threads: 2,
+                        skip_shorter: 1.5,
+                    }
+                });
+            });
+            renderInputFiles();
+        }
+
+        function removeFile(index) {
+            inputFiles.splice(index, 1);
+            renderInputFiles();
+        }
+
+        function renderInputFiles() {
+            const tbody = document.getElementById('inputFilesTable');
+            tbody.innerHTML = inputFiles.map((file, index) => `
+                <tr>
+                    <td>${file.input}</td>
+                    <td><input type="text" value="${file.namespace}" onchange="inputFiles[${index}].namespace = this.value;"></td>
+                    <td><input type="text" value="${file.parameters.threshold}" onchange="inputFiles[${index}].parameters.threshold = this.value;"></td>
+                    <td><input type="number" value="${file.parameters.quiet_for}" step="0.1" onchange="inputFiles[${index}].parameters.quiet_for = parseFloat(this.value);"></td>
+                    <td><input type="number" value="${file.parameters.padding}" step="0.1" onchange="inputFiles[${index}].parameters.padding = parseFloat(this.value);"></td>
+                    <td><input type="number" value="${file.parameters.threads}" min="1" onchange="inputFiles[${index}].parameters.threads = parseInt(this.value);"></td>
+                    <td><input type="number" value="${file.parameters.skip_shorter}" step="0.1" onchange="inputFiles[${index}].parameters.skip_shorter = parseFloat(this.value);"></td>
+                    <td><button class="danger" onclick="removeFile(${index})">Remove</button></td>
+                </tr>
+            `).join('');
+        }
+
+        async function submitJob() {
+            if (inputFiles.length === 0) {
+                alert('Please add files');
+                return;
+            }
+            if (!document.getElementById('outputDir').value) {
+                alert('Please set output directory');
+                return;
+            }
+
+            const jobData = {
+                files: inputFiles,
+                output_dir: document.getElementById('outputDir').value,
+                job_concurrency: parseInt(document.getElementById('jobConcurrency').value),
+                dry_run: document.getElementById('dryRun').checked,
+            };
+
+            try {
+                const response = await fetch('/api/jobs', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(jobData),
+                });
+                const result = await response.json();
+                if (response.ok) {
+                    inputFiles = [];
+                    renderInputFiles();
+                    pollJobs();
+                } else {
+                    alert('Error: ' + result.error);
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        window.updateJobsTable = function(jobs) {
+            if (jobs.length === 0) {
+                document.getElementById('jobsTable').innerHTML = '<tr><td colspan="5" style="text-align: center; color: #999;">No jobs</td></tr>';
+                return;
+            }
+
+            let html = '';
+            jobs.forEach(job => {
+                const completedCount = job.completed_count || 0;
+                const totalCount = job.files_count || 1;
+                const progress = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
+
+                html += `
+                    <tr>
+                        <td>${job.id}</td>
+                        <td><span class="status-badge status-${job.status}">${job.status}</span></td>
+                        <td>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${progress}%"></div>
+                            </div>
+                            <small>${completedCount}/${totalCount}</small>
+                        </td>
+                        <td>${completedCount}</td>
+                        <td>
+                            ${job.status === 'running' ? `<button class="danger" onclick="cancelJob('${job.id}')">Cancel</button>` : ''}
+                            ${job.status === 'completed' ? `<button onclick="viewJob('${job.id}')">View</button>` : ''}
+                        </td>
+                    </tr>
+                `;
+            });
+            document.getElementById('jobsTable').innerHTML = html;
+        };
+
+        async function cancelJob(jobId) {
+            try {
+                await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+                pollJobs();
+            } catch (error) {
+                alert('Error cancelling job: ' + error.message);
+            }
+        }
+
+        function viewJob(jobId) {
+            alert('View job: ' + jobId);
+        }
+
+        renderInputFiles();
+    </script>
+</div>
