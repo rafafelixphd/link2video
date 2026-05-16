@@ -4,9 +4,6 @@ Batch Segment Processor - Web UI launcher.
 
 Starts Flask server at http://localhost:5000
 """
-import sys
-import os
-
 from app import create_app
 
 if __name__ == "__main__":
