@@ -158,8 +158,27 @@ class JobManager:
                             self._persist_job(job["id"], job)
                             break
 
+                    # Update job status based on all files
+                    self._update_job_status(job)
+                    self._persist_job(job["id"], job)
+
             except (json.JSONDecodeError, KeyError):
                 pass
+
+    def _update_job_status(self, job: Dict[str, Any]) -> None:
+        """Update job status based on all file statuses."""
+        statuses = [f["status"] for f in job["files"]]
+
+        if all(s == "completed" for s in statuses):
+            job["status"] = "completed"
+            job["completed_at"] = datetime.utcnow().isoformat() + "Z"
+        elif all(s in ["failed", "cancelled"] for s in statuses):
+            job["status"] = "failed"
+            job["completed_at"] = datetime.utcnow().isoformat() + "Z"
+        elif any(s == "running" for s in statuses):
+            job["status"] = "running"
+        elif any(s == "pending" for s in statuses):
+            job["status"] = "pending"
 
     def _spawn_pending_files(self) -> None:
         """Spawn background processes for pending files."""
@@ -198,6 +217,7 @@ class JobManager:
                     for file_info in job["files"]:
                         if file_info["status"] == "pending":
                             self._spawn_subprocess(job, file_info)
+                            self._update_job_status(job)
                             self._persist_job(job["id"], job)
                             return  # Only spawn one at a time
 
@@ -258,15 +278,20 @@ class JobManager:
             cmd.append("--dry-run")
 
         try:
-            # Spawn process
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # Create log file for this subprocess
+            log_file = self.jobs_dir / f"{job['id']}_subprocess.log"
+
+            # Spawn process with output captured to log file
+            with open(log_file, "w") as log:
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                )
 
             file_info["status"] = "running"
             file_info["progress"] = 0.5  # In progress
+            file_info["log_file"] = str(log_file)
             job["pid"] = process.pid
             job["status"] = "running"
             job["started_at"] = datetime.utcnow().isoformat() + "Z"
