@@ -101,7 +101,10 @@ class SilenceSplitter(SplitProcessor):
         duration = self._get_video_duration(input_file)
 
         # Sliding window: process segments between silences
-        segments = []  # List of (segment_id, audio_start, audio_end) tuples
+        # Store: (segment_id, save_start, save_end) for cutter
+        # Also track audio boundaries for diagnostics
+        segments = []
+        segment_info = []  # For diagnostic output
         segment_id = 0
         current_pos = 0.0
 
@@ -114,12 +117,24 @@ class SilenceSplitter(SplitProcessor):
             # Check if segment meets minimum length requirement
             if audio_duration >= skip_shorter:
                 segment_id += 1
-                segments.append((segment_id, audio_start, audio_end))
 
                 # Calculate save boundaries with padding
                 save_start = max(audio_start - padding, 0.0)
                 save_end = min(audio_end + padding, duration)
                 save_duration = save_end - save_start
+
+                # Store for cutter (with padding applied)
+                segments.append((segment_id, save_start, save_end))
+                segment_info.append({
+                    'id': segment_id,
+                    'audio_start': audio_start,
+                    'audio_end': audio_end,
+                    'audio_duration': audio_duration,
+                    'save_start': save_start,
+                    'save_end': save_end,
+                    'save_duration': save_duration,
+                    'padding': padding
+                })
 
                 segment_name = f"segment_{segment_id:03d}"
                 print(
@@ -151,12 +166,24 @@ class SilenceSplitter(SplitProcessor):
 
             if audio_duration >= skip_shorter:
                 segment_id += 1
-                segments.append((segment_id, audio_start, audio_end))
 
-                # Calculate save boundaries with padding
+                # Calculate save boundaries with padding (no padding after final end)
                 save_start = max(audio_start - padding, 0.0)
-                save_end = duration  # No padding after end
+                save_end = duration
                 save_duration = save_end - save_start
+
+                # Store for cutter (with padding applied)
+                segments.append((segment_id, save_start, save_end))
+                segment_info.append({
+                    'id': segment_id,
+                    'audio_start': audio_start,
+                    'audio_end': audio_end,
+                    'audio_duration': audio_duration,
+                    'save_start': save_start,
+                    'save_end': save_end,
+                    'save_duration': save_duration,
+                    'padding': padding
+                })
 
                 segment_name = f"segment_{segment_id:03d}"
                 print(
