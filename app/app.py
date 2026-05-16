@@ -9,6 +9,7 @@ Routes:
 - DELETE /api/jobs/<id>    Cancel job
 """
 import json
+import os
 from flask import Flask, render_template, request, jsonify
 from pathlib import Path
 from .job_manager import JobManager
@@ -18,6 +19,24 @@ def create_app(jobs_dir: str = "app/.jobs") -> Flask:
     """Create and configure Flask application."""
     app = Flask(__name__, template_folder="templates")
     job_manager = JobManager(jobs_dir=jobs_dir)
+
+    # Recover running jobs on startup
+    with app.app_context():
+        for job_file in Path(jobs_dir).glob("*.json"):
+            try:
+                with open(job_file) as f:
+                    job = json.load(f)
+                if job["status"] == "running" and job.get("pid"):
+                    # Check if process still alive
+                    try:
+                        os.kill(job["pid"], 0)
+                    except ProcessLookupError:
+                        # Process dead
+                        job["status"] = "failed"
+                        job["error"] = "Process terminated unexpectedly"
+                        job_manager._persist_job(job["id"], job)
+            except (json.JSONDecodeError, KeyError):
+                pass
 
     @app.route("/")
     def index():
