@@ -22,6 +22,8 @@ from gooey import Gooey, GooeyParser
 from .platform_detector import detect_platform
 from .config import get_default_download_path
 from .auto.split.silent import SilenceSplitter
+from .auto.extract_audio import ExtractAudioProcessor
+from .auto.transcribe import TranscribeProcessor
 
 
 def _handle_silence_split(args):
@@ -55,6 +57,82 @@ def _handle_silence_split(args):
 
         if args.dry_run:
             print("\n(Preview mode — no files were created)")
+
+    except Exception as e:
+        print(f"Error: {str(e)}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
+def _handle_extract_audio(args):
+    """
+    Handle the --auto extract-audio CLI subcommand.
+
+    Args:
+        args: Parsed command-line arguments for audio extraction.
+
+    Raises:
+        SystemExit: On file not found or processing errors.
+    """
+    if not os.path.isfile(args.input):
+        print(f"Error: file not found: {args.input}", file=sys.stderr)
+        sys.exit(1)
+
+    processor = ExtractAudioProcessor()
+
+    try:
+        result = processor.extract(
+            input_file=args.input,
+            output_dir=args.output_dir,
+            namespace=args.namespace,
+            format=args.format,
+            dry_run=args.dry_run,
+        )
+
+        if not args.dry_run:
+            print(f"\nAudio extraction complete!")
+            print(f"  Audio file: {result.audio_path}")
+            print(f"  Metadata: {result.metadata_path}")
+
+    except Exception as e:
+        print(f"Error: {str(e)}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
+def _handle_transcribe(args):
+    """
+    Handle the --auto transcribe CLI subcommand.
+
+    Args:
+        args: Parsed command-line arguments for transcription.
+
+    Raises:
+        SystemExit: On file not found or processing errors.
+    """
+    if not os.path.isfile(args.input):
+        print(f"Error: file not found: {args.input}", file=sys.stderr)
+        sys.exit(1)
+
+    processor = TranscribeProcessor()
+
+    try:
+        result = processor.transcribe(
+            audio_file=args.input,
+            output_dir=args.output_dir,
+            namespace=args.namespace,
+            model=args.model,
+            language=args.language,
+            device=args.device,
+            dry_run=args.dry_run,
+        )
+
+        if not args.dry_run:
+            output_path = os.path.join(args.output_dir, args.namespace, f"{args.namespace}.json")
+            print(f"\nTranscription complete!")
+            print(f"  Output: {output_path}")
 
     except Exception as e:
         print(f"Error: {str(e)}", file=sys.stderr)
@@ -214,11 +292,89 @@ def main():
             help="Preview planned segments without cutting or creating files. Useful for tuning parameters before committing"
         )
 
+        # extract-audio subcommand
+        extract_audio = subparsers.add_parser(
+            "extract-audio",
+            help="Extract audio from video or audio file"
+        )
+        extract_audio.add_argument(
+            "input",
+            help="Input video or audio file path"
+        )
+        extract_audio.add_argument(
+            "--namespace",
+            required=True,
+            help="Output filename prefix"
+        )
+        extract_audio.add_argument(
+            "--output-dir",
+            default="segments",
+            help="Root directory for output (default: segments)"
+        )
+        extract_audio.add_argument(
+            "--format",
+            choices=["wav", "mp3"],
+            default="wav",
+            help="Output audio format (default: wav)"
+        )
+        extract_audio.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Preview without creating files"
+        )
+
+        # transcribe subcommand
+        transcribe = subparsers.add_parser(
+            "transcribe",
+            help="Transcribe audio using Whisper"
+        )
+        transcribe.add_argument(
+            "input",
+            help="Input audio file path"
+        )
+        transcribe.add_argument(
+            "--namespace",
+            required=True,
+            help="Output filename prefix"
+        )
+        transcribe.add_argument(
+            "--output-dir",
+            default="segments",
+            help="Root directory for output (default: segments)"
+        )
+        transcribe.add_argument(
+            "--model",
+            choices=["tiny", "base", "small", "medium", "large"],
+            default="base",
+            help="Whisper model to use (default: base)"
+        )
+        transcribe.add_argument(
+            "--language",
+            choices=["en", "ja", "pt"],
+            default="en",
+            help="Language code (default: en)"
+        )
+        transcribe.add_argument(
+            "--device",
+            choices=["auto", "cpu", "cuda", "mps"],
+            default="auto",
+            help="Device to use for processing (default: auto)"
+        )
+        transcribe.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Preview without processing"
+        )
+
         args = parser.parse_args(cli_argv[1:])
 
         # Route to handler
         if args.auto_command == "silence-split":
             _handle_silence_split(args)
+        elif args.auto_command == "extract-audio":
+            _handle_extract_audio(args)
+        elif args.auto_command == "transcribe":
+            _handle_transcribe(args)
         else:
             parser.print_help()
             sys.exit(1)
