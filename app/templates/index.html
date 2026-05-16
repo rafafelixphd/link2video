@@ -7,7 +7,9 @@
         <div style="margin-bottom: 10px;">
             <button onclick="addFiles()">+ Add Files</button>
             <label style="margin-left: 20px;">
-                Output Dir: <input type="text" id="outputDir" placeholder="/path/to/output" style="width: 300px; padding: 6px;">
+                Output Dir:
+                <input type="text" id="outputDir" placeholder="/path/to/output" style="width: 250px; padding: 6px;">
+                <button onclick="selectOutputDir()" style="margin-left: 5px;">📁 Browse</button>
             </label>
             <label style="margin-left: 20px;">
                 Job Concurrency: <input type="number" id="jobConcurrency" value="2" min="1" max="8" style="width: 60px; padding: 6px;">
@@ -55,10 +57,27 @@
     </div>
 
     <input type="file" id="fileInput" multiple style="display: none;" onchange="handleFileSelect(event)">
+    <input type="file" id="dirInput" webkitdirectory directory style="display: none;" onchange="handleDirSelect(event)">
 
     <script>
         // State
         let inputFiles = [];
+
+        function selectOutputDir() {
+            document.getElementById('dirInput').click();
+        }
+
+        function handleDirSelect(event) {
+            const files = Array.from(event.target.files);
+            if (files.length > 0) {
+                // Get the directory path from the first file's webkitRelativePath
+                const firstFilePath = files[0].webkitRelativePath || files[0].name;
+                const dirPath = firstFilePath.split('/').slice(0, -1).join('/');
+                if (dirPath) {
+                    document.getElementById('outputDir').value = dirPath;
+                }
+            }
+        }
 
         function addFiles() {
             document.getElementById('fileInput').click();
