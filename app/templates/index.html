@@ -92,7 +92,7 @@
             const tbody = document.getElementById('inputFilesTable');
             tbody.innerHTML = inputFiles.map((file, index) => `
                 <tr>
-                    <td>${file.input}</td>
+                    <td><input type="text" value="${file.input}" onchange="inputFiles[${index}].input = this.value;" style="width: 100%; max-width: 300px; padding: 4px;"></td>
                     <td><input type="text" value="${file.namespace}" onchange="inputFiles[${index}].namespace = this.value;"></td>
                     <td><input type="text" value="${file.parameters.threshold}" onchange="inputFiles[${index}].parameters.threshold = this.value;"></td>
                     <td><input type="number" value="${file.parameters.quiet_for}" step="0.1" onchange="inputFiles[${index}].parameters.quiet_for = parseFloat(this.value);"></td>
