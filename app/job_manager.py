@@ -4,42 +4,31 @@ Job queue and process manager for batch segment processing.
 Handles:
 - Job persistence (JSON files in app/.jobs/)
 - Job queueing and concurrency limiting
-- Process spawning and monitoring
-- PID tracking and cleanup
+- Subprocess spawning and PID tracking
+- Async process monitoring
 """
 import os
 import json
-import time
-import uuid
 import subprocess
+import uuid
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
 
 class JobManager:
-    """Manages job queue, persistence, and process execution."""
+    """Manages job queue, persistence, and subprocess execution."""
 
     def __init__(self, jobs_dir: str = "app/.jobs"):
         self.jobs_dir = Path(jobs_dir)
         self.jobs_dir.mkdir(parents=True, exist_ok=True)
-        self.running_pids: Dict[str, int] = {}  # job_id -> pid
 
     def create_job(
         self,
         files: List[Dict[str, Any]],
         global_params: Dict[str, Any],
     ) -> str:
-        """
-        Create a new batch job and persist to disk.
-
-        Args:
-            files: List of file dicts with input, namespace, output_dir, parameters
-            global_params: Global settings (job_concurrency, dry_run)
-
-        Returns:
-            job_id: Unique identifier for the job
-        """
+        """Create a new batch job and persist to disk."""
         job_id = self._generate_job_id()
         job_data = {
             "id": job_id,
@@ -59,8 +48,6 @@ class JobManager:
                     "progress": 0,
                     "segments_created": 0,
                     "error": None,
-                    "stdout": "",
-                    "stderr": "",
                 }
                 for f in files
             ],
@@ -72,7 +59,7 @@ class JobManager:
     def list_jobs(self) -> List[Dict[str, Any]]:
         """Return list of all jobs (running + completed)."""
         jobs = []
-        for job_file in sorted(self.jobs_dir.glob("*.json")):
+        for job_file in sorted(self.jobs_dir.glob("*.json"), reverse=True):
             try:
                 with open(job_file) as f:
                     job = json.load(f)
@@ -129,104 +116,161 @@ class JobManager:
         with open(job_file, "w") as f:
             json.dump(job_data, f, indent=2)
 
-    def process_queue(self, job_concurrency: int = 2) -> None:
+    def process_queue(self) -> None:
         """
-        Process job queue: spawn next pending job if slots available.
+        Process job queue: monitor running processes and spawn new ones.
 
-        Called periodically by Flask to manage background jobs.
+        Called on each Flask request to:
+        1. Check if running processes are still alive
+        2. Mark completed/failed jobs
+        3. Spawn next pending file if slots available
         """
-        # Count currently running jobs
-        running_count = 0
+        # First, update status of all running processes
+        self._monitor_running_processes()
+
+        # Then spawn new processes if slots available
+        self._spawn_pending_files()
+
+    def _monitor_running_processes(self) -> None:
+        """Check status of all running processes and update job state."""
         for job_file in self.jobs_dir.glob("*.json"):
             try:
                 with open(job_file) as f:
                     job = json.load(f)
-                    if job["status"] == "running" and job.get("pid"):
-                        # Check if process still alive
-                        try:
-                            os.kill(job["pid"], 0)  # Signal 0: check existence
-                        except ProcessLookupError:
-                            # Process dead; mark job as failed
-                            job["status"] = "failed"
-                            job["completed_at"] = datetime.utcnow().isoformat() + "Z"
+
+                if job["status"] not in ["pending", "running"]:
+                    continue
+
+                if not job.get("pid"):
+                    continue
+
+                # Check if process still alive
+                try:
+                    os.kill(job["pid"], 0)  # Signal 0 = check existence
+                    # Still running
+                except ProcessLookupError:
+                    # Process died; find which file was being processed
+                    for f in job["files"]:
+                        if f["status"] == "running":
+                            f["status"] = "completed"
+                            f["progress"] = 1.0
+                            job["pid"] = None
                             self._persist_job(job["id"], job)
-                            running_count -= 1
-                            continue
-                        running_count += 1
+                            break
+
             except (json.JSONDecodeError, KeyError):
                 pass
 
-        # If slots available, spawn next pending file
+    def _spawn_pending_files(self) -> None:
+        """Spawn background processes for pending files."""
+        # Count currently running processes
+        running_count = sum(
+            1 for job_file in self.jobs_dir.glob("*.json")
+            if self._job_has_running_pid(job_file)
+        )
+
+        # Get concurrency limit from first running/pending job
+        job_concurrency = 2
+        for job_file in self.jobs_dir.glob("*.json"):
+            try:
+                with open(job_file) as f:
+                    job = json.load(f)
+                if job["status"] in ["pending", "running"]:
+                    job_concurrency = min(
+                        job["global_parameters"].get("job_concurrency", 2),
+                        8
+                    )
+                    break
+            except (json.JSONDecodeError, KeyError):
+                pass
+
+        # Spawn next pending file if slots available
         if running_count < job_concurrency:
-            for job_file in self.jobs_dir.glob("*.json"):
+            for job_file in sorted(self.jobs_dir.glob("*.json")):
                 try:
                     with open(job_file) as f:
                         job = json.load(f)
-                    if job["status"] != "pending":
+
+                    if job["status"] not in ["pending", "running"]:
                         continue
 
-                    # Find first pending file in this job
+                    # Find first pending file
                     for file_info in job["files"]:
                         if file_info["status"] == "pending":
-                            self._spawn_segment_process(job, file_info)
-                            job["status"] = "running"
-                            job["started_at"] = datetime.utcnow().isoformat() + "Z"
+                            self._spawn_subprocess(job, file_info)
                             self._persist_job(job["id"], job)
                             return  # Only spawn one at a time
+
                 except (json.JSONDecodeError, KeyError):
                     pass
 
-    def _spawn_segment_process(self, job: Dict[str, Any], file_info: Dict[str, Any]) -> None:
-        """
-        Spawn a background process to segment a single file.
+    def _job_has_running_pid(self, job_file: Path) -> bool:
+        """Check if job file has a running process."""
+        try:
+            with open(job_file) as f:
+                job = json.load(f)
+            if not job.get("pid"):
+                return False
+            try:
+                os.kill(job["pid"], 0)
+                return True
+            except ProcessLookupError:
+                return False
+        except (json.JSONDecodeError, KeyError):
+            return False
 
-        Imports SilenceSplitter directly and calls its split() method.
-        """
-        from link2video.auto.split.silent import SilenceSplitter
+    def _spawn_subprocess(self, job: Dict[str, Any], file_info: Dict[str, Any]) -> None:
+        """Spawn a background subprocess for a single file."""
+        input_file = file_info["input"]
+        namespace = file_info["namespace"]
+        output_dir = file_info["output_dir"]
+        params = file_info["parameters"]
 
-        file_info["status"] = "running"
-        file_info["stdout"] = ""
-        file_info["stderr"] = ""
-
-        # Validate input file exists
-        if not os.path.isfile(file_info["input"]):
+        # Validate input file
+        if not os.path.isfile(input_file):
             file_info["status"] = "failed"
-            file_info["error"] = f"File not found: {file_info['input']}"
-            self._persist_job(job["id"], job)
+            file_info["error"] = f"File not found: {input_file}"
             return
 
-        # Validate output directory
-        output_path = Path(file_info["output_dir"])
-        if not output_path.exists():
-            try:
-                output_path.mkdir(parents=True, exist_ok=True)
-            except Exception as e:
-                file_info["status"] = "failed"
-                file_info["error"] = f"Cannot create output dir: {str(e)}"
-                self._persist_job(job["id"], job)
-                return
+        # Create output directory
+        try:
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            file_info["status"] = "failed"
+            file_info["error"] = f"Cannot create output dir: {str(e)}"
+            return
+
+        # Build command
+        cmd = [
+            "python", "-m", "link2video.__main__",
+            "--auto", "segment",
+            input_file,
+            "--namespace", namespace,
+            "--output-dir", output_dir,
+            "--threshold", params["threshold"],
+            "--quiet-for", str(params["quiet_for"]),
+            "--padding", str(params["padding"]),
+            "--threads", str(params["threads"]),
+            "--skip-shorter", str(params["skip_shorter"]),
+        ]
+
+        if job["global_parameters"].get("dry_run", False):
+            cmd.append("--dry-run")
 
         try:
-            splitter = SilenceSplitter()
-            segments = splitter.split(
-                input_file=file_info["input"],
-                output_dir=file_info["output_dir"],
-                namespace=file_info["namespace"],
-                threshold=file_info["parameters"]["threshold"],
-                quiet_for=file_info["parameters"]["quiet_for"],
-                padding=file_info["parameters"]["padding"],
-                threads=file_info["parameters"]["threads"],
-                skip_shorter=file_info["parameters"]["skip_shorter"],
-                dry_run=job["global_parameters"].get("dry_run", False),
+            # Spawn process
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
 
-            file_info["status"] = "completed"
-            file_info["segments_created"] = len(segments) if segments else 0
-            file_info["progress"] = 1.0
+            file_info["status"] = "running"
+            file_info["progress"] = 0.5  # In progress
+            job["pid"] = process.pid
+            job["status"] = "running"
+            job["started_at"] = datetime.utcnow().isoformat() + "Z"
 
         except Exception as e:
             file_info["status"] = "failed"
-            file_info["error"] = str(e)
-            file_info["stderr"] = str(e)
-
-        self._persist_job(job["id"], job)
+            file_info["error"] = f"Failed to spawn: {str(e)}"

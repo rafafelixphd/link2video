@@ -12,7 +12,7 @@ import json
 import os
 from flask import Flask, render_template, request, jsonify
 from pathlib import Path
-from .job_manager import JobManager
+from job_manager import JobManager
 
 
 def create_app(jobs_dir: str = "app/.jobs") -> Flask:
@@ -41,7 +41,7 @@ def create_app(jobs_dir: str = "app/.jobs") -> Flask:
     @app.route("/")
     def index():
         """Serve main page."""
-        return render_template("index.html")
+        return render_template("base.html")
 
     @app.route("/api/jobs", methods=["GET"])
     def list_jobs():
@@ -96,6 +96,6 @@ def create_app(jobs_dir: str = "app/.jobs") -> Flask:
     @app.before_request
     def process_queue():
         """Process job queue on each request."""
-        job_manager.process_queue(job_concurrency=2)
+        job_manager.process_queue()
 
     return app
