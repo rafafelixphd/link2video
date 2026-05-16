@@ -90,12 +90,18 @@ def create_app(jobs_dir: str = "app/.jobs") -> Flask:
 
     @app.route("/api/jobs/<job_id>", methods=["DELETE"])
     def cancel_job(job_id: str):
-        """Cancel a running job."""
+        """Cancel and delete a job."""
         success = job_manager.cancel_job(job_id)
         if success:
-            return jsonify({"status": "cancelled"}), 200
+            return jsonify({"status": "deleted"}), 200
         else:
-            return jsonify({"error": "Could not cancel job"}), 400
+            return jsonify({"error": "Could not delete job"}), 400
+
+    @app.route("/api/jobs/clear/all", methods=["DELETE"])
+    def clear_all_jobs():
+        """Clear all job history."""
+        job_manager.clear_all_jobs()
+        return jsonify({"status": "cleared"}), 200
 
     @app.before_request
     def process_queue():

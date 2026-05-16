@@ -87,22 +87,52 @@ class JobManager:
             return None
 
     def cancel_job(self, job_id: str) -> bool:
-        """Cancel a running job by terminating its process."""
+        """Cancel a running job by terminating its process and deleting the job."""
         job = self.get_job(job_id)
-        if not job or not job.get("pid"):
+        if not job:
             return False
 
-        try:
-            os.kill(job["pid"], 9)  # SIGKILL
-            job["status"] = "cancelled"
-            job["completed_at"] = datetime.utcnow().isoformat() + "Z"
-            for f in job["files"]:
-                if f["status"] == "running":
-                    f["status"] = "cancelled"
-            self._persist_job(job_id, job)
-            return True
-        except ProcessLookupError:
-            return False
+        # Kill process if running
+        if job.get("pid"):
+            try:
+                os.kill(job["pid"], 9)  # SIGKILL
+            except ProcessLookupError:
+                pass
+
+        # Delete job file and associated files
+        self._delete_job(job_id)
+        return True
+
+    def delete_job(self, job_id: str) -> bool:
+        """Delete a job and all associated files."""
+        self._delete_job(job_id)
+        return True
+
+    def _delete_job(self, job_id: str) -> None:
+        """Remove job JSON and all associated files."""
+        # Delete job JSON
+        job_file = self.jobs_dir / f"{job_id}.json"
+        if job_file.exists():
+            job_file.unlink()
+
+        # Delete subprocess log
+        log_file = self.jobs_dir / f"{job_id}_subprocess.log"
+        if log_file.exists():
+            log_file.unlink()
+
+        # Delete config file
+        config_file = self.jobs_dir / f"{job_id}_config.json"
+        if config_file.exists():
+            config_file.unlink()
+
+    def clear_all_jobs(self) -> None:
+        """Delete all job files and associated data."""
+        for job_file in self.jobs_dir.glob("*.json"):
+            try:
+                job_id = job_file.stem
+                self._delete_job(job_id)
+            except Exception:
+                pass
 
     def _generate_job_id(self) -> str:
         """Generate unique job ID based on timestamp."""

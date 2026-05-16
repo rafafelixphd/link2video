@@ -40,7 +40,10 @@
 
     <!-- Active Jobs Section -->
     <div>
-        <h4 style="margin-bottom: 10px;">Active Jobs</h4>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h4 style="margin: 0;">Active Jobs</h4>
+            <button onclick="clearAllJobs()" style="background: #dc3545;">🗑️ Clear All</button>
+        </div>
         <table>
             <thead>
                 <tr>
@@ -200,8 +203,8 @@
                         <td>${completedCount}</td>
                         <td data-job-error="${job.id}"><small style="color: #999;">—</small></td>
                         <td>
-                            ${job.status === 'running' || job.status === 'pending' || job.status === 'failed' ? `<button class="danger" onclick="cancelJob('${job.id}')">Cancel</button>` : ''}
-                            ${job.status === 'completed' ? `<button onclick="viewJob('${job.id}')">View</button>` : ''}
+                            ${job.status === 'running' || job.status === 'pending' || job.status === 'failed' ? `<button class="danger" onclick="cancelJob('${job.id}')">Delete</button>` : ''}
+                            ${job.status === 'completed' ? `<button class="danger" onclick="cancelJob('${job.id}')">Delete</button>` : ''}
                         </td>
                     </tr>
                 `;
@@ -214,7 +217,19 @@
                 await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
                 pollJobs();
             } catch (error) {
-                alert('Error cancelling job: ' + error.message);
+                alert('Error deleting job: ' + error.message);
+            }
+        }
+
+        async function clearAllJobs() {
+            if (!confirm('Delete all job history? This cannot be undone.')) {
+                return;
+            }
+            try {
+                await fetch('/api/jobs/clear/all', { method: 'DELETE' });
+                pollJobs();
+            } catch (error) {
+                alert('Error clearing jobs: ' + error.message);
             }
         }
 
