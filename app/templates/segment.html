@@ -200,7 +200,7 @@
                         <td>${completedCount}</td>
                         <td data-job-error="${job.id}"><small style="color: #999;">—</small></td>
                         <td>
-                            ${job.status === 'running' ? `<button class="danger" onclick="cancelJob('${job.id}')">Cancel</button>` : ''}
+                            ${job.status === 'running' || job.status === 'pending' || job.status === 'failed' ? `<button class="danger" onclick="cancelJob('${job.id}')">Cancel</button>` : ''}
                             ${job.status === 'completed' ? `<button onclick="viewJob('${job.id}')">View</button>` : ''}
                         </td>
                     </tr>
