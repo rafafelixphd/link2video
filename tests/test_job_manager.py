@@ -1,5 +1,4 @@
 import json
-import time
 from pathlib import Path
 import pytest
 from app.job_manager import JobManager, run_split

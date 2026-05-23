@@ -4,6 +4,8 @@ Job queue and process manager for batch segment processing.
 Module-level functions (run_split, _update_file_status) run inside
 ProcessPoolExecutor worker processes and self-report status to JSON.
 """
+import contextlib
+import fcntl
 import json
 import os
 import uuid
@@ -13,6 +15,28 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from link2video.auto.split.silent import SilenceSplitter
+
+
+# ---------------------------------------------------------------------------
+# Module-level constants
+# ---------------------------------------------------------------------------
+
+MAX_WORKERS = 8
+
+
+# ---------------------------------------------------------------------------
+# File locking helper
+# ---------------------------------------------------------------------------
+
+@contextlib.contextmanager
+def _locked(path: Path, mode: str = "r+"):
+    """Open a file with an exclusive flock for safe concurrent read+write."""
+    with open(path, mode) as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            yield f
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 # ---------------------------------------------------------------------------
@@ -30,23 +54,21 @@ def _update_file_status(
     """Write file status update to the job JSON. Called from worker process."""
     job_file = Path(jobs_dir) / f"{job_id}.json"
     try:
-        with open(job_file) as f:
+        with _locked(job_file) as f:
             job = json.load(f)
-
-        file_info = job["files"][file_index]
-        file_info["status"] = status
-
-        if status == "running":
-            job["status"] = "running"
-            if not job.get("started_at"):
-                job["started_at"] = datetime.now(timezone.utc).isoformat()
-        elif status == "completed":
-            file_info["segments_created"] = segments
-            file_info["progress"] = 1.0
-        elif status == "failed":
-            file_info["error"] = error
-
-        with open(job_file, "w") as f:
+            file_info = job["files"][file_index]
+            file_info["status"] = status
+            if status == "running":
+                job["status"] = "running"
+                if not job.get("started_at"):
+                    job["started_at"] = datetime.now(timezone.utc).isoformat()
+            elif status == "completed":
+                file_info["segments_created"] = segments
+                file_info["progress"] = 1.0
+            elif status == "failed":
+                file_info["error"] = error
+            f.seek(0)
+            f.truncate()
             json.dump(job, f, indent=2)
     except Exception:
         pass  # Best-effort — can't recover from write failure in a subprocess
@@ -98,7 +120,7 @@ class JobManager:
     def __init__(self, jobs_dir: str = "app/.jobs") -> None:
         self.jobs_dir = Path(jobs_dir)
         self.jobs_dir.mkdir(parents=True, exist_ok=True)
-        self._executor = ProcessPoolExecutor(max_workers=8)
+        self._executor = ProcessPoolExecutor(max_workers=MAX_WORKERS)
         self._futures: Dict[Tuple[str, int], Future] = {}
 
     def recover(self) -> None:
@@ -114,8 +136,7 @@ class JobManager:
                         file_info["status"] = "failed"
                         file_info["error"] = "Failed: server restarted while processing"
                 self._update_job_status(job)
-                with open(job_file, "w") as f:
-                    json.dump(job, f, indent=2)
+                self._persist_job(job["id"], job)
             except (json.JSONDecodeError, KeyError):
                 pass
 
@@ -202,58 +223,63 @@ class JobManager:
         self._spawn_pending_files()
 
     def _spawn_pending_files(self) -> None:
-        """Submit pending files to the executor, respecting concurrency limit."""
-        running_count = len(self._futures)
-
+        """Submit pending files to the executor, filling all available slots."""
         job_concurrency = 2
         for job_file in self.jobs_dir.glob("*.json"):
             try:
                 with open(job_file) as f:
                     job = json.load(f)
                 if job["status"] in ("pending", "running"):
-                    job_concurrency = min(job["global_parameters"].get("job_concurrency", 2), 8)
+                    job_concurrency = min(job["global_parameters"].get("job_concurrency", 2), MAX_WORKERS)
                     break
             except (json.JSONDecodeError, KeyError):
                 pass
 
-        if running_count >= job_concurrency:
-            return
+        while len(self._futures) < job_concurrency:
+            submitted = False
+            for job_file in sorted(self.jobs_dir.glob("*.json")):
+                try:
+                    with open(job_file) as f:
+                        job = json.load(f)
 
-        for job_file in sorted(self.jobs_dir.glob("*.json")):
-            try:
-                with open(job_file) as f:
-                    job = json.load(f)
-
-                if job["status"] not in ("pending", "running"):
-                    continue
-
-                for file_index, file_info in enumerate(job["files"]):
-                    if file_info["status"] != "pending":
+                    if job["status"] not in ("pending", "running"):
                         continue
 
-                    if not Path(file_info["input"]).is_file():
-                        file_info["status"] = "failed"
-                        file_info["error"] = f"File not found: {file_info['input']}"
-                        self._update_job_status(job)
-                        self._persist_job(job["id"], job)
-                        return
+                    for file_index, file_info in enumerate(job["files"]):
+                        if file_info["status"] != "pending":
+                            continue
 
-                    future = self._executor.submit(
-                        run_split,
-                        job_id=job["id"],
-                        file_index=file_index,
-                        jobs_dir=str(self.jobs_dir),
-                        input_file=file_info["input"],
-                        output_dir=file_info["output_dir"],
-                        namespace=file_info["namespace"],
-                        params=file_info["parameters"],
-                        dry_run=job["global_parameters"].get("dry_run", False),
-                    )
-                    self._futures[(job["id"], file_index)] = future
-                    return
+                        if not Path(file_info["input"]).is_file():
+                            file_info["status"] = "failed"
+                            file_info["error"] = f"File not found: {file_info['input']}"
+                            self._update_job_status(job)
+                            self._persist_job(job["id"], job)
+                            submitted = True  # did work, re-check
+                            break
 
-            except (json.JSONDecodeError, KeyError):
-                pass
+                        future = self._executor.submit(
+                            run_split,
+                            job_id=job["id"],
+                            file_index=file_index,
+                            jobs_dir=str(self.jobs_dir),
+                            input_file=file_info["input"],
+                            output_dir=file_info["output_dir"],
+                            namespace=file_info["namespace"],
+                            params=file_info["parameters"],
+                            dry_run=job["global_parameters"].get("dry_run", False),
+                        )
+                        self._futures[(job["id"], file_index)] = future
+                        submitted = True
+                        break
+
+                    if submitted:
+                        break
+
+                except (json.JSONDecodeError, KeyError):
+                    pass
+
+            if not submitted:
+                break  # No more pending work
 
     def _update_job_status(self, job: Dict[str, Any]) -> None:
         """Recalculate job status from its file statuses."""
@@ -285,8 +311,15 @@ class JobManager:
     def _persist_job(self, job_id: str, job_data: Dict[str, Any]) -> None:
         """Write job state to disk."""
         job_file = self.jobs_dir / f"{job_id}.json"
-        with open(job_file, "w") as f:
-            json.dump(job_data, f, indent=2)
+        # Use 'a+' to create if not exists, then lock and overwrite
+        with open(job_file, "a+") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                f.seek(0)
+                f.truncate()
+                json.dump(job_data, f, indent=2)
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
 
     def _delete_job(self, job_id: str) -> None:
         """Delete job JSON from disk."""
