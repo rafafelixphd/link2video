@@ -6,7 +6,9 @@ from app.job_manager import JobManager, run_split
 
 
 def test_run_split_updates_json_on_success(tmp_path):
-    """run_split writes 'completed' status to JSON when done."""
+    """run_split writes 'completed' status to JSON when SilenceSplitter succeeds."""
+    from unittest.mock import patch
+
     job_id = "test_job_001"
     job_file = tmp_path / f"{job_id}.json"
     job_file.write_text(json.dumps({
@@ -24,23 +26,26 @@ def test_run_split_updates_json_on_success(tmp_path):
             "segments_created": 0,
             "error": None,
         }],
-        "global_parameters": {"job_concurrency": 1, "dry_run": True},
+        "global_parameters": {"job_concurrency": 1, "dry_run": False},
     }))
     (tmp_path / "fake.mp4").touch()
 
-    run_split(
-        job_id=job_id,
-        file_index=0,
-        jobs_dir=str(tmp_path),
-        input_file=str(tmp_path / "fake.mp4"),
-        output_dir=str(tmp_path / "out"),
-        namespace="fake",
-        params={"threshold": "-10dB", "quiet_for": 3.5, "padding": 1.0, "threads": 1, "skip_shorter": 1.5},
-        dry_run=True,
-    )
+    with patch("app.job_manager.SilenceSplitter") as mock_splitter:
+        mock_splitter.return_value.split.return_value = []
+        run_split(
+            job_id=job_id,
+            file_index=0,
+            jobs_dir=str(tmp_path),
+            input_file=str(tmp_path / "fake.mp4"),
+            output_dir=str(tmp_path / "out"),
+            namespace="fake",
+            params={"threshold": "-10dB", "quiet_for": 3.5, "padding": 1.0, "threads": 1, "skip_shorter": 1.5},
+            dry_run=False,
+        )
 
     result = json.loads(job_file.read_text())
-    assert result["files"][0]["status"] in ("completed", "failed")
+    assert result["files"][0]["status"] == "completed"
+    assert result["files"][0]["segments_created"] == 0
 
 
 def test_run_split_writes_failed_on_bad_file(tmp_path):
