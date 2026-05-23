@@ -10,16 +10,19 @@ def _manager():
 
 @jobs_bp.route("/")
 def index():
+    """Serve main page."""
     return render_template("base.html")
 
 
 @jobs_bp.route("/api/jobs", methods=["GET"])
 def list_jobs():
+    """Return list of all jobs."""
     return jsonify({"jobs": _manager().list_jobs()})
 
 
 @jobs_bp.route("/api/jobs/<job_id>", methods=["GET"])
 def get_job(job_id: str):
+    """Return details for a specific job."""
     job = _manager().get_job(job_id)
     if not job:
         return jsonify({"error": "Job not found"}), 404
@@ -28,7 +31,10 @@ def get_job(job_id: str):
 
 @jobs_bp.route("/api/jobs", methods=["POST"])
 def create_job():
+    """Create a new batch job."""
     data = request.get_json()
+    if data is None:
+        return jsonify({"error": "Request must be JSON"}), 400
 
     if not data.get("files"):
         return jsonify({"error": "No files provided"}), 400
@@ -50,6 +56,7 @@ def create_job():
 
 @jobs_bp.route("/api/jobs/<job_id>", methods=["DELETE"])
 def cancel_job(job_id: str):
+    """Cancel and delete a job."""
     if _manager().cancel_job(job_id):
         return jsonify({"status": "deleted"}), 200
     return jsonify({"error": "Could not delete job"}), 400
@@ -57,5 +64,6 @@ def cancel_job(job_id: str):
 
 @jobs_bp.route("/api/jobs/clear/all", methods=["DELETE"])
 def clear_all_jobs():
+    """Clear all job history."""
     _manager().clear_all_jobs()
     return jsonify({"status": "cleared"}), 200
