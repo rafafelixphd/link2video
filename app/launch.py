@@ -1,14 +1,8 @@
 #!/usr/bin/env python3
-"""
-Batch Segment Processor - Web UI launcher.
-
-Starts Flask server at http://localhost:5000
-"""
-import sys
-import os
-
+"""Batch Processor — web UI launcher."""
 import argparse
-from app import create_app
+
+from app.factory import create_app
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Batch Segment Processor")
@@ -21,6 +15,7 @@ if __name__ == "__main__":
 
     print("=" * 60)
     print("  Batch Segment Processor")
-    print(f"  Starting at http://{args.host}:{args.port}")
+    print(f"  http://{args.host}:{args.port}")
     print("=" * 60)
+
     app.run(debug=args.debug, host=args.host, port=args.port)
