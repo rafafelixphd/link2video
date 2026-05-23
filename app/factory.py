@@ -1,5 +1,5 @@
 """Flask application factory."""
-from flask import Flask
+from flask import Flask, request
 
 from .job_manager import JobManager
 from .routes import jobs_bp
@@ -17,6 +17,7 @@ def create_app(jobs_dir: str = "app/.jobs") -> Flask:
 
     @app.before_request
     def tick():
-        app.config["JOB_MANAGER"].process_queue()
+        if request.endpoint != "static":
+            app.config["JOB_MANAGER"].process_queue()
 
     return app
