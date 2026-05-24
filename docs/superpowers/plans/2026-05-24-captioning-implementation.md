@@ -6,7 +6,7 @@
 
 **Architecture:** A `CaptionProcessor` (in `link2video/auto/caption/`) follows the same pattern as `ExtractAudioProcessor` and `TranscribeProcessor`. A `CaptionRunner` background thread (in `app/`) dispatches the processor and writes results. A new `caption.html` tab follows the `transcribe.html` UI pattern with an added pre-flight YAML inspection panel.
 
-**Tech Stack:** Python 3.11+, ffmpeg/ffprobe (subprocess), `requests` (Ollama HTTP API), Flask, vanilla JS (no frontend framework).
+**Tech Stack:** Python 3.11+, ffmpeg/ffprobe (subprocess), `ollama` Python library (Ollama HTTP API), Flask, vanilla JS (no frontend framework).
 
 ---
 
@@ -186,10 +186,12 @@ import base64
 import subprocess
 from pathlib import Path
 
+import ollama
+
 
 class CaptionProcessor:
     def __init__(self, ollama_url: str = "http://debugx.local/ollama") -> None:
-        self.ollama_url = ollama_url.rstrip("/")
+        self._client = ollama.Client(host=ollama_url)
 
     def _get_video_duration(self, video_path: str) -> float:
         result = subprocess.run(
@@ -239,34 +241,53 @@ git commit -m "feat: add CaptionProcessor frame extraction helpers"
 
 **Files:**
 - Modify: `link2video/auto/caption/processor.py`
+- Modify: `requirements.txt`
 - Test: `tests/auto/test_caption_processor.py`
 
-- [ ] **Step 1: Write failing tests**
+- [ ] **Step 1: Add `ollama` to requirements.txt**
+
+Append to `requirements.txt`:
+```
+ollama
+```
+
+Install it:
+```bash
+pip install ollama
+```
+
+- [ ] **Step 2: Write failing tests**
 
 Add to `tests/auto/test_caption_processor.py`:
 
 ```python
-import requests
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 
-def test_call_ollama_returns_text(tmp_path):
+def test_call_ollama_returns_text():
     processor = CaptionProcessor(ollama_url="http://fake")
-    mock_resp = MagicMock()
-    mock_resp.json.return_value = {"response": "Frame 1: A desk.\nFrame 2: A chair."}
-    mock_resp.raise_for_status = MagicMock()
-    with patch("requests.post", return_value=mock_resp) as mock_post:
+    fake_response = MagicMock()
+    fake_response.__getitem__ = lambda self, key: "Frame 1: A desk.\nFrame 2: A chair." if key == "response" else None
+    with patch.object(processor._client, "generate", return_value={"response": "Frame 1: A desk.\nFrame 2: A chair."}) as mock_gen:
         text = processor._call_ollama(
             model="llava",
             prompt="describe",
             images=["aGVsbG8=", "d29ybGQ="],
         )
     assert text == "Frame 1: A desk.\nFrame 2: A chair."
-    call_kwargs = mock_post.call_args
-    body = call_kwargs[1]["json"]
-    assert body["model"] == "llava"
-    assert len(body["images"]) == 2
-    assert body["stream"] is False
+    mock_gen.assert_called_once_with(
+        model="llava",
+        prompt="describe",
+        images=["aGVsbG8=", "d29ybGQ="],
+    )
+
+
+def test_call_ollama_no_images():
+    processor = CaptionProcessor(ollama_url="http://fake")
+    with patch.object(processor._client, "generate", return_value={"response": "Summary."}) as mock_gen:
+        text = processor._call_ollama(model="llava", prompt="summarize")
+    call_kwargs = mock_gen.call_args[1]
+    assert "images" not in call_kwargs
 
 
 def test_parse_frame_descriptions_extracts_one_per_frame():
@@ -282,57 +303,22 @@ def test_parse_frame_descriptions_extracts_one_per_frame():
 
 def test_parse_frame_descriptions_fills_parse_errors():
     processor = CaptionProcessor(ollama_url="http://fake")
-    # Only 2 frames returned when 3 expected
     text = "Frame 1: Hello.\nFrame 2: World."
     result = processor._parse_frame_descriptions(text, expected_count=3)
     assert len(result) == 3
     assert result[2] == "[parse error]"
 ```
 
-- [ ] **Step 2: Run to verify failures**
+- [ ] **Step 3: Run to verify failures**
 
 ```bash
 python -m pytest tests/auto/test_caption_processor.py -k "ollama or parse" -v
 ```
 Expected: `AttributeError` — methods don't exist yet.
 
-- [ ] **Step 3: Implement `_call_ollama` and `_parse_frame_descriptions`**
+- [ ] **Step 4: Implement `_call_ollama` and `_parse_frame_descriptions`**
 
-Add to `link2video/auto/caption/processor.py`:
-
-```python
-import re
-import requests
-
-
-# (inside class CaptionProcessor)
-
-    def _call_ollama(self, model: str, prompt: str, images: list[str] | None = None) -> str:
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "stream": False,
-        }
-        if images:
-            payload["images"] = images
-        resp = requests.post(
-            f"{self.ollama_url}/api/generate",
-            json=payload,
-            timeout=120,
-        )
-        resp.raise_for_status()
-        return resp.json()["response"]
-
-    def _parse_frame_descriptions(self, text: str, expected_count: int) -> list[str]:
-        pattern = re.compile(r"Frame\s+\d+:\s*(.+?)(?=Frame\s+\d+:|$)", re.DOTALL | re.IGNORECASE)
-        matches = pattern.findall(text)
-        descriptions = [m.strip() for m in matches]
-        while len(descriptions) < expected_count:
-            descriptions.append("[parse error]")
-        return descriptions[:expected_count]
-```
-
-The full `processor.py` at this point (replace the file entirely):
+Replace `link2video/auto/caption/processor.py` entirely:
 
 ```python
 # link2video/auto/caption/processor.py
@@ -341,12 +327,12 @@ import re
 import subprocess
 from pathlib import Path
 
-import requests
+import ollama
 
 
 class CaptionProcessor:
     def __init__(self, ollama_url: str = "http://debugx.local/ollama") -> None:
-        self.ollama_url = ollama_url.rstrip("/")
+        self._client = ollama.Client(host=ollama_url)
 
     def _get_video_duration(self, video_path: str) -> float:
         result = subprocess.run(
@@ -375,23 +361,14 @@ class CaptionProcessor:
         with open(frame_path, "rb") as f:
             return base64.b64encode(f.read()).decode("utf-8")
 
-    def _call_ollama(self, model: str, prompt: str, images: list[str] | None = None) -> str:
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "stream": False,
-        }
+    def _call_ollama(self, model: str, prompt: str, images: list | None = None) -> str:
+        kwargs = {"model": model, "prompt": prompt}
         if images:
-            payload["images"] = images
-        resp = requests.post(
-            f"{self.ollama_url}/api/generate",
-            json=payload,
-            timeout=120,
-        )
-        resp.raise_for_status()
-        return resp.json()["response"]
+            kwargs["images"] = images
+        response = self._client.generate(**kwargs)
+        return response["response"]
 
-    def _parse_frame_descriptions(self, text: str, expected_count: int) -> list[str]:
+    def _parse_frame_descriptions(self, text: str, expected_count: int) -> list:
         pattern = re.compile(r"Frame\s+\d+:\s*(.+?)(?=Frame\s+\d+:|$)", re.DOTALL | re.IGNORECASE)
         matches = pattern.findall(text)
         descriptions = [m.strip() for m in matches]
@@ -400,17 +377,17 @@ class CaptionProcessor:
         return descriptions[:expected_count]
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 5: Run tests to verify they pass**
 
 ```bash
 python -m pytest tests/auto/test_caption_processor.py -k "ollama or parse" -v
 ```
-Expected: all 3 PASS.
+Expected: all 4 PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add link2video/auto/caption/processor.py tests/auto/test_caption_processor.py
+git add link2video/auto/caption/processor.py requirements.txt tests/auto/test_caption_processor.py
 git commit -m "feat: add Ollama call and frame description parsing to CaptionProcessor"
 ```
 
@@ -537,7 +514,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-import requests
+import ollama
 
 from link2video.auto.caption.models import CaptionResult
 from link2video.metadata_manager import MetadataManager
@@ -555,7 +532,7 @@ _CONTEXT_KEY_MAP = {
 
 class CaptionProcessor:
     def __init__(self, ollama_url: str = "http://debugx.local/ollama") -> None:
-        self.ollama_url = ollama_url.rstrip("/")
+        self._client = ollama.Client(host=ollama_url)
 
     def caption(
         self,
@@ -727,16 +704,11 @@ class CaptionProcessor:
             return base64.b64encode(f.read()).decode("utf-8")
 
     def _call_ollama(self, model: str, prompt: str, images: list | None = None) -> str:
-        payload = {"model": model, "prompt": prompt, "stream": False}
+        kwargs = {"model": model, "prompt": prompt}
         if images:
-            payload["images"] = images
-        resp = requests.post(
-            f"{self.ollama_url}/api/generate",
-            json=payload,
-            timeout=120,
-        )
-        resp.raise_for_status()
-        return resp.json()["response"]
+            kwargs["images"] = images
+        response = self._client.generate(**kwargs)
+        return response["response"]
 
     def _parse_frame_descriptions(self, text: str, expected_count: int) -> list[str]:
         pattern = re.compile(r"Frame\s+\d+:\s*(.+?)(?=Frame\s+\d+:|$)", re.DOTALL | re.IGNORECASE)
@@ -988,19 +960,22 @@ from unittest.mock import MagicMock, patch
 
 
 def test_get_ollama_models_success(client):
-    with patch("requests.get") as mock_get:
-        mock_get.return_value = MagicMock(
-            status_code=200,
-            json=lambda: {"models": [{"name": "llava"}, {"name": "moondream"}]},
-        )
+    mock_model_a = MagicMock()
+    mock_model_a.model = "llava"
+    mock_model_b = MagicMock()
+    mock_model_b.model = "moondream"
+    mock_list_resp = MagicMock()
+    mock_list_resp.models = [mock_model_a, mock_model_b]
+    with patch("ollama.Client") as mock_client_cls:
+        mock_client_cls.return_value.list.return_value = mock_list_resp
         resp = client.get("/api/ollama/models")
     assert resp.status_code == 200
     assert resp.get_json() == {"models": ["llava", "moondream"]}
 
 
 def test_get_ollama_models_unreachable(client):
-    import requests as _req
-    with patch("requests.get", side_effect=_req.RequestException("timeout")):
+    with patch("ollama.Client") as mock_client_cls:
+        mock_client_cls.return_value.list.side_effect = Exception("connection refused")
         resp = client.get("/api/ollama/models")
     assert resp.status_code == 502
 
@@ -1079,23 +1054,27 @@ Expected: 404 errors for unknown routes.
 
 - [ ] **Step 3: Add routes to `app/routes.py`**
 
-Add `import requests` at the top of `routes.py`, then append these route handlers before the final line:
+Add these imports at the top of `routes.py` (after the existing imports):
 
 ```python
-import requests as _requests
+import ollama as _ollama
 import yaml as _yaml
 from pathlib import Path as _Path
+```
 
+Then append these route handlers:
+
+```python
 # ── Ollama proxy ───────────────────────────────────────────────────────────────
 
 @jobs_bp.route("/api/ollama/models", methods=["GET"])
 def ollama_models():
-    """Proxy GET /api/tags from the Ollama server."""
+    """List models available on the configured Ollama server."""
     ollama_url = current_app.config.get("OLLAMA_URL", "http://debugx.local/ollama")
     try:
-        resp = _requests.get(f"{ollama_url}/api/tags", timeout=5)
-        resp.raise_for_status()
-        models = [m["name"] for m in resp.json().get("models", [])]
+        client = _ollama.Client(host=ollama_url)
+        result = client.list()
+        models = [m.model for m in result.models]
         return jsonify({"models": models})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 502
