@@ -92,19 +92,7 @@ class TranscribeRunner:
                 device=device,
             )
 
-        whisper = transcription.whisper_output
-        segments = [
-            {"start": s["start"], "end": s["end"], "text": s["text"]}
-            for s in whisper.get("segments", [])
-        ]
-
-        MetadataManager().update(video_path, "link2video/auto/transcribe", {
-            "model": transcription.model,
-            "language": transcription.language_requested,
-            "device": transcription.device,
-            "timestamp": transcription.timestamp,
-            "text": whisper.get("text", ""),
-            "segments": segments,
-        })
+        # Pass the full transcription through — don't cherry-pick fields
+        MetadataManager().update(video_path, "link2video/auto/transcribe", transcription.to_dict())
 
         return {"yaml_path": str(video.with_suffix(".yaml"))}

@@ -7,6 +7,8 @@ import uuid
 from pathlib import Path
 from typing import Dict, Optional
 
+import yaml
+
 from link2video.auto.extract_audio import ExtractAudioProcessor
 from link2video.metadata_manager import MetadataManager
 
@@ -77,22 +79,31 @@ class AudioRunner:
         dst_mp3 = video_dir / f"{stem}.mp3"
         src_mp3.rename(dst_mp3)
 
-        # Remove the processor's per-namespace YAML (we write our own unified YAML)
+        # Read the processor's YAML before discarding it
         src_yaml = Path(result.metadata_path)
+        processor_meta = {}
         if src_yaml.exists():
+            with open(src_yaml) as f:
+                processor_meta = yaml.safe_load(f) or {}
             src_yaml.unlink()
         # Remove the now-empty namespace subdir
         with contextlib.suppress(OSError):
             src_mp3.parent.rmdir()
 
-        probe = self._probe_audio(str(dst_mp3))
+        # Pass the full processor metadata through — don't cherry-pick fields
+        # Fallback: if processor YAML was missing, probe for basics
+        if not processor_meta:
+            probe = self._probe_audio(str(dst_mp3))
+            processor_meta = {
+                "audio": {
+                    "format": "mp3",
+                    "duration": round(result.duration, 3),
+                    "sample_rate": probe["sample_rate"],
+                    "channels": probe["channels"],
+                }
+            }
 
-        MetadataManager().update(video_path, "link2video/auto/extract", {
-            "format": "mp3",
-            "duration": round(result.duration, 3),
-            "sample_rate": probe["sample_rate"],
-            "channels": probe["channels"],
-        })
+        MetadataManager().update(video_path, "link2video/auto/extract", processor_meta)
 
         return {"mp3_path": str(dst_mp3)}
 
