@@ -3,6 +3,10 @@ from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, render_template, request
 
+import ollama as _ollama
+import yaml as _yaml
+from pathlib import Path as _Path
+
 jobs_bp = Blueprint("jobs", __name__)
 
 
@@ -216,4 +220,88 @@ def get_transcribe(run_id: str):
 def clear_transcribe(run_id: str):
     """Remove a finished transcription entry."""
     _transcribe_runner().clear(run_id)
+    return jsonify({"status": "cleared"}), 200
+
+
+# ── Ollama proxy ───────────────────────────────────────────────────────────────
+
+@jobs_bp.route("/api/ollama/models", methods=["GET"])
+def ollama_models():
+    """List models available on the configured Ollama server."""
+    ollama_url = current_app.config.get("OLLAMA_URL", "http://debugx.local/ollama")
+    try:
+        client = _ollama.Client(host=ollama_url)
+        result = client.list()
+        models = [m.model for m in result.models]
+        return jsonify({"models": models})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 502
+
+
+# ── YAML info ──────────────────────────────────────────────────────────────────
+
+_YAML_SECTION_MAP = {
+    "link2video/auto/transcribe": "transcription",
+    "link2video/auto/caption": "captioning",
+    "link2video/auto/extract": "extract",
+    "link2video/download": "comments",
+}
+
+
+@jobs_bp.route("/api/yaml-info", methods=["GET"])
+def yaml_info():
+    """Return which sections are present in the YAML alongside a video."""
+    video_path = request.args.get("path", "").strip()
+    if not video_path:
+        return jsonify({"error": "path parameter required"}), 400
+    yaml_path = _Path(video_path).with_suffix(".yaml")
+    if not yaml_path.exists():
+        return jsonify({"exists": False, "sections": [], "comments": ""})
+    data = _yaml.safe_load(yaml_path.read_text()) or {}
+    sections = [friendly for key, friendly in _YAML_SECTION_MAP.items() if key in data]
+    comments = ""
+    if "link2video/download" in data:
+        comments = data["link2video/download"].get("comments", "")
+    return jsonify({"exists": True, "sections": sections, "comments": comments})
+
+
+# ── Caption routes ─────────────────────────────────────────────────────────────
+
+def _caption_runner():
+    return current_app.config["CAPTION_RUNNER"]
+
+
+@jobs_bp.route("/api/caption", methods=["POST"])
+def start_caption():
+    """Start a background captioning run."""
+    data = request.get_json(force=True, silent=True)
+    if data is None:
+        return jsonify({"error": "Request must be JSON"}), 400
+    video_path = (data.get("video_path") or "").strip()
+    if not video_path:
+        return jsonify({"error": "video_path is required"}), 400
+    run_id = _caption_runner().start(
+        video_path=video_path,
+        interval_seconds=float(data.get("interval_seconds", 1.0)),
+        sequence_length=int(data.get("sequence_length", 3)),
+        model=(data.get("model") or "llava").strip(),
+        additional_query=(data.get("additional_query") or "").strip(),
+        context_sections=data.get("context_sections") or [],
+    )
+    return jsonify({"id": run_id}), 201
+
+
+@jobs_bp.route("/api/caption/<run_id>", methods=["GET"])
+def get_caption(run_id: str):
+    """Return status of a captioning run."""
+    entry = _caption_runner().get(run_id)
+    if entry is None:
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(entry)
+
+
+@jobs_bp.route("/api/caption/<run_id>", methods=["DELETE"])
+def clear_caption(run_id: str):
+    """Remove a finished captioning entry."""
+    _caption_runner().clear(run_id)
     return jsonify({"status": "cleared"}), 200

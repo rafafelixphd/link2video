@@ -1,6 +1,6 @@
 import json
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from app.factory import create_app
 
 
@@ -260,4 +260,92 @@ def test_get_transcribe_not_found(client_with_runners):
 
 def test_delete_transcribe(client_with_runners):
     resp = client_with_runners.delete("/api/transcribe/def987654321")
+    assert resp.status_code == 200
+
+
+# ── Ollama / YAML-info / Caption route tests ──────────────────────────────────
+
+def test_get_ollama_models_success(client):
+    mock_model_a = MagicMock()
+    mock_model_a.model = "llava"
+    mock_model_b = MagicMock()
+    mock_model_b.model = "moondream"
+    mock_list_resp = MagicMock()
+    mock_list_resp.models = [mock_model_a, mock_model_b]
+    with patch("ollama.Client") as mock_client_cls:
+        mock_client_cls.return_value.list.return_value = mock_list_resp
+        resp = client.get("/api/ollama/models")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"models": ["llava", "moondream"]}
+
+
+def test_get_ollama_models_unreachable(client):
+    with patch("ollama.Client") as mock_client_cls:
+        mock_client_cls.return_value.list.side_effect = Exception("connection refused")
+        resp = client.get("/api/ollama/models")
+    assert resp.status_code == 502
+
+
+def test_get_yaml_info_no_yaml(client, tmp_path):
+    video = tmp_path / "v.mp4"
+    video.touch()
+    resp = client.get(f"/api/yaml-info?path={video}")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["exists"] is False
+    assert data["sections"] == []
+
+
+def test_get_yaml_info_with_yaml(client, tmp_path):
+    video = tmp_path / "v.mp4"
+    video.touch()
+    yaml_path = tmp_path / "v.yaml"
+    yaml_path.write_text(
+        "link2video/auto/transcribe:\n  text: hello\n"
+        "link2video/download:\n  comments: nice\n"
+    )
+    resp = client.get(f"/api/yaml-info?path={video}")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["exists"] is True
+    assert "transcription" in data["sections"]
+    assert "comments" in data["sections"]
+    assert data["comments"] == "nice"
+
+
+def test_post_caption_missing_video_path(client):
+    resp = client.post("/api/caption", json={})
+    assert resp.status_code == 400
+
+
+def test_post_caption_success(client, tmp_path):
+    video = tmp_path / "v.mp4"
+    video.touch()
+    runner_mock = MagicMock()
+    runner_mock.start.return_value = "abc123def456"
+    client.application.config["CAPTION_RUNNER"] = runner_mock
+    resp = client.post("/api/caption", json={
+        "video_path": str(video),
+        "interval_seconds": 1.0,
+        "sequence_length": 3,
+        "model": "llava",
+        "additional_query": "",
+        "context_sections": ["transcription"],
+    })
+    assert resp.status_code == 201
+    assert resp.get_json()["id"] == "abc123def456"
+
+
+def test_get_caption_not_found(client):
+    runner_mock = MagicMock()
+    runner_mock.get.return_value = None
+    client.application.config["CAPTION_RUNNER"] = runner_mock
+    resp = client.get("/api/caption/doesnotexist")
+    assert resp.status_code == 404
+
+
+def test_delete_caption_run(client):
+    runner_mock = MagicMock()
+    client.application.config["CAPTION_RUNNER"] = runner_mock
+    resp = client.delete("/api/caption/abc123")
     assert resp.status_code == 200
