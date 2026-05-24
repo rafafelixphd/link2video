@@ -1,1 +1,168 @@
-<div class="tab-placeholder">Transcribe — Coming soon</div>
+<div style="padding: 20px;">
+    <h3 style="margin-bottom: 20px;">Transcribe</h3>
+
+    <div style="margin-bottom: 30px;">
+        <h4 style="margin-bottom: 10px;">Settings</h4>
+
+        <div style="margin-bottom: 10px;">
+            <label>
+                Video File:
+                <input type="text" id="trVideoPath" placeholder="/path/to/video.mp4"
+                       style="width: 500px; padding: 6px; margin-left: 5px;">
+            </label>
+        </div>
+
+        <div style="margin-bottom: 10px;">
+            <label>
+                Model:
+                <select id="trModel" style="padding: 6px; margin-left: 5px;">
+                    <option value="base" selected>base</option>
+                    <option value="tiny">tiny</option>
+                    <option value="small">small</option>
+                    <option value="medium">medium</option>
+                    <option value="large">large</option>
+                </select>
+            </label>
+        </div>
+
+        <div style="margin-bottom: 10px;">
+            <label>
+                Language:
+                <select id="trLanguage" style="padding: 6px; margin-left: 5px;">
+                    <option value="en" selected>English</option>
+                    <option value="pt">Portuguese</option>
+                    <option value="ja">Japanese</option>
+                </select>
+            </label>
+        </div>
+
+        <div style="margin-bottom: 10px;">
+            <label>
+                Device:
+                <select id="trDevice" style="padding: 6px; margin-left: 5px;">
+                    <option value="auto" selected>auto</option>
+                    <option value="cpu">cpu</option>
+                    <option value="mps">mps</option>
+                    <option value="cuda">cuda</option>
+                </select>
+            </label>
+        </div>
+
+        <p style="color: #666; font-size: 0.9em;">
+            Note: if no .mp3 exists alongside the video, audio will be extracted automatically first.
+        </p>
+
+        <button id="trBtn" onclick="startTranscribe()" style="background: #28a745;">&#128221; Transcribe</button>
+    </div>
+
+    <div id="trStatusSection" style="display: none;">
+        <h4 style="margin-bottom: 10px;">Status</h4>
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 120px;">Status</th>
+                    <th>Result / Error</th>
+                    <th style="width: 100px;">Action</th>
+                </tr>
+            </thead>
+            <tbody id="trStatusBody"></tbody>
+        </table>
+    </div>
+
+    <script>
+        let trRunId = null;
+        let trPollInterval = null;
+        let trPollErrors = 0;
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            const d = document.createElement('div');
+            d.textContent = str;
+            return d.innerHTML;
+        }
+
+        async function startTranscribe() {
+            const videoPath = document.getElementById('trVideoPath').value.trim();
+            if (!videoPath) { alert('Video file path is required'); return; }
+
+            const model = document.getElementById('trModel').value;
+            const language = document.getElementById('trLanguage').value;
+            const device = document.getElementById('trDevice').value;
+
+            document.getElementById('trBtn').disabled = true;
+
+            try {
+                const resp = await fetch('/api/transcribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ video_path: videoPath, model, language, device }),
+                });
+                const data = await resp.json();
+                if (!resp.ok) { alert('Error: ' + data.error); document.getElementById('trBtn').disabled = false; return; }
+                trRunId = data.id;
+                renderTrStatus('pending', null, null);
+                startTrPolling();
+            } catch (err) {
+                document.getElementById('trBtn').disabled = false;
+                alert('Error: ' + err.message);
+            }
+        }
+
+        function startTrPolling() {
+            trPollErrors = 0;
+            if (trPollInterval) clearInterval(trPollInterval);
+            trPollInterval = setInterval(async () => {
+                if (!trRunId) return;
+                try {
+                    const resp = await fetch('/api/transcribe/' + trRunId);
+                    const data = await resp.json();
+                    if (!resp.ok) {
+                        renderTrStatus('failed', null, 'Server error: ' + (data.error || resp.status));
+                        clearInterval(trPollInterval); trPollInterval = null;
+                        document.getElementById('trBtn').disabled = false;
+                        return;
+                    }
+                    renderTrStatus(data.status, data.result, data.error);
+                    if (data.status === 'completed' || data.status === 'failed') {
+                        clearInterval(trPollInterval); trPollInterval = null;
+                        document.getElementById('trBtn').disabled = false;
+                    }
+                } catch (err) {
+                    trPollErrors++;
+                    if (trPollErrors >= 5) {
+                        clearInterval(trPollInterval); trPollInterval = null;
+                        document.getElementById('trBtn').disabled = false;
+                        renderTrStatus('failed', null, 'Connection lost. Reload and try again.');
+                    }
+                }
+            }, 2000);
+        }
+
+        function renderTrStatus(status, result, error) {
+            document.getElementById('trStatusSection').style.display = 'block';
+            const badgeClass = status === 'completed' ? 'status-complete' : 'status-' + status;
+            let detail = '<span style="color: #999;">—</span>';
+            if (status === 'completed' && result) {
+                detail = '<span style="color: #28a745;">Transcript saved to ' + escapeHtml(result.yaml_path) + '</span>';
+            } else if (status === 'failed' && error) {
+                detail = '<span style="color: #dc3545;">' + escapeHtml(error) + '</span>';
+            }
+            const isTerminal = status === 'completed' || status === 'failed';
+            document.getElementById('trStatusBody').innerHTML = `
+                <tr>
+                    <td><span class="status-badge ${badgeClass}">${escapeHtml(status)}</span></td>
+                    <td><small>${detail}</small></td>
+                    <td>${isTerminal ? '<button class="danger" onclick="clearTrStatus()">Clear</button>' : ''}</td>
+                </tr>
+            `;
+        }
+
+        async function clearTrStatus() {
+            if (trRunId) { await fetch('/api/transcribe/' + trRunId, { method: 'DELETE' }); trRunId = null; }
+            if (trPollInterval) { clearInterval(trPollInterval); trPollInterval = null; }
+            document.getElementById('trBtn').disabled = false;
+            document.getElementById('trStatusSection').style.display = 'none';
+            document.getElementById('trStatusBody').innerHTML = '';
+        }
+    </script>
+</div>
