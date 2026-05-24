@@ -7,9 +7,11 @@
         <div style="margin-bottom: 10px;">
             <label>
                 Input Folder:
-                <input type="text" id="inputFolder" placeholder="/path/to/folder" style="width: 300px; padding: 6px;">
+                <input type="text" id="inputFolder" value="./examples/" style="width: 300px; padding: 6px;">
             </label>
             <button onclick="scanFolder()" style="margin-left: 5px;">🔍 Scan</button>
+            <button onclick="document.getElementById('inputFolder').value='./examples/'" style="margin-left: 8px; background: #6c757d; font-size: 0.85em;">Examples</button>
+            <button onclick="document.getElementById('inputFolder').value='~/Movies/link2video/'" style="margin-left: 4px; background: #6c757d; font-size: 0.85em;">~/Movies</button>
             <span id="scanStatus" style="margin-left: 10px; color: #999; font-size: 0.9em;"></span>
         </div>
         <div style="margin-bottom: 10px;">

@@ -26,7 +26,7 @@ def scan_folder():
     if not folder:
         return jsonify({"error": "path parameter is required"}), 400
 
-    folder_path = Path(folder)
+    folder_path = Path(folder).expanduser()
     if not folder_path.is_dir():
         return jsonify({"error": f"Not a directory: {folder}"}), 400
 
@@ -143,4 +143,77 @@ def get_download(run_id: str):
 def clear_download(run_id: str):
     """Remove a finished download entry."""
     _download_runner().clear(run_id)
+    return jsonify({"status": "cleared"}), 200
+
+
+# ── Audio routes ───────────────────────────────────────────────────────────────
+
+def _audio_runner():
+    return current_app.config["AUDIO_RUNNER"]
+
+
+@jobs_bp.route("/api/audio", methods=["POST"])
+def start_audio():
+    """Start a background audio extraction."""
+    data = request.get_json(force=True, silent=True)
+    if data is None:
+        return jsonify({"error": "Request must be JSON"}), 400
+    video_path = (data.get("video_path") or "").strip()
+    if not video_path:
+        return jsonify({"error": "video_path is required"}), 400
+    run_id = _audio_runner().start(video_path)
+    return jsonify({"id": run_id}), 201
+
+
+@jobs_bp.route("/api/audio/<run_id>", methods=["GET"])
+def get_audio(run_id: str):
+    """Return status of an audio extraction run."""
+    entry = _audio_runner().get(run_id)
+    if entry is None:
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(entry)
+
+
+@jobs_bp.route("/api/audio/<run_id>", methods=["DELETE"])
+def clear_audio(run_id: str):
+    """Remove a finished audio extraction entry."""
+    _audio_runner().clear(run_id)
+    return jsonify({"status": "cleared"}), 200
+
+
+# ── Transcribe routes ──────────────────────────────────────────────────────────
+
+def _transcribe_runner():
+    return current_app.config["TRANSCRIBE_RUNNER"]
+
+
+@jobs_bp.route("/api/transcribe", methods=["POST"])
+def start_transcribe():
+    """Start a background transcription."""
+    data = request.get_json(force=True, silent=True)
+    if data is None:
+        return jsonify({"error": "Request must be JSON"}), 400
+    video_path = (data.get("video_path") or "").strip()
+    if not video_path:
+        return jsonify({"error": "video_path is required"}), 400
+    model = (data.get("model") or "base").strip()
+    language = (data.get("language") or "en").strip()
+    device = (data.get("device") or "auto").strip()
+    run_id = _transcribe_runner().start(video_path, model=model, language=language, device=device)
+    return jsonify({"id": run_id}), 201
+
+
+@jobs_bp.route("/api/transcribe/<run_id>", methods=["GET"])
+def get_transcribe(run_id: str):
+    """Return status of a transcription run."""
+    entry = _transcribe_runner().get(run_id)
+    if entry is None:
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(entry)
+
+
+@jobs_bp.route("/api/transcribe/<run_id>", methods=["DELETE"])
+def clear_transcribe(run_id: str):
+    """Remove a finished transcription entry."""
+    _transcribe_runner().clear(run_id)
     return jsonify({"status": "cleared"}), 200

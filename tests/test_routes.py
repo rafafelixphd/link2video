@@ -1,5 +1,6 @@
 import json
 import pytest
+from unittest.mock import MagicMock
 from app.factory import create_app
 
 
@@ -158,3 +159,105 @@ def test_clear_download(client):
     assert resp.get_json() == {"status": "cleared"}
     # confirm it's gone
     assert client.get(f"/api/download/{run_id}").status_code == 404
+
+
+@pytest.fixture
+def client_with_runners(tmp_path):
+    app = create_app(jobs_dir=str(tmp_path))
+    app.config["TESTING"] = True
+
+    mock_audio = MagicMock()
+    mock_audio.start.return_value = "abc123456789"
+    mock_audio.get.return_value = {"status": "completed", "result": {"mp3_path": "/v/v.mp3"}, "error": None}
+    app.config["AUDIO_RUNNER"] = mock_audio
+
+    mock_transcribe = MagicMock()
+    mock_transcribe.start.return_value = "def987654321"
+    mock_transcribe.get.return_value = {"status": "completed", "result": {"yaml_path": "/v/v.yaml"}, "error": None}
+    app.config["TRANSCRIBE_RUNNER"] = mock_transcribe
+
+    with app.test_client() as c:
+        c.app = app
+        yield c
+
+
+# Audio routes
+def test_post_audio_missing_video_path(client_with_runners):
+    resp = client_with_runners.post("/api/audio", json={})
+    assert resp.status_code == 400
+    assert "video_path" in resp.get_json()["error"]
+
+
+def test_post_audio_no_body(client_with_runners):
+    resp = client_with_runners.post("/api/audio")
+    assert resp.status_code == 400
+
+
+def test_post_audio_success(client_with_runners):
+    resp = client_with_runners.post("/api/audio", json={"video_path": "/videos/v.mp4"})
+    assert resp.status_code == 201
+    assert resp.get_json()["id"] == "abc123456789"
+
+
+def test_get_audio_found(client_with_runners):
+    resp = client_with_runners.get("/api/audio/abc123456789")
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "completed"
+
+
+def test_get_audio_not_found(client_with_runners):
+    client_with_runners.app.config["AUDIO_RUNNER"].get.return_value = None
+    resp = client_with_runners.get("/api/audio/notexist")
+    assert resp.status_code == 404
+
+
+def test_delete_audio(client_with_runners):
+    resp = client_with_runners.delete("/api/audio/abc123456789")
+    assert resp.status_code == 200
+    assert resp.get_json()["status"] == "cleared"
+
+
+# Transcribe routes
+def test_post_transcribe_no_body(client_with_runners):
+    resp = client_with_runners.post("/api/transcribe")
+    assert resp.status_code == 400
+
+
+def test_post_transcribe_missing_video_path(client_with_runners):
+    resp = client_with_runners.post("/api/transcribe", json={})
+    assert resp.status_code == 400
+
+
+def test_post_transcribe_success(client_with_runners):
+    resp = client_with_runners.post("/api/transcribe", json={
+        "video_path": "/videos/v.mp4",
+        "model": "small",
+        "language": "pt",
+        "device": "cpu",
+    })
+    assert resp.status_code == 201
+    assert resp.get_json()["id"] == "def987654321"
+
+
+def test_post_transcribe_defaults(client_with_runners):
+    resp = client_with_runners.post("/api/transcribe", json={"video_path": "/videos/v.mp4"})
+    assert resp.status_code == 201
+    client_with_runners.app.config["TRANSCRIBE_RUNNER"].start.assert_called_with(
+        "/videos/v.mp4", model="base", language="en", device="auto"
+    )
+
+
+def test_get_transcribe_found(client_with_runners):
+    resp = client_with_runners.get("/api/transcribe/def987654321")
+    assert resp.status_code == 200
+
+
+def test_get_transcribe_not_found(client_with_runners):
+    client_with_runners.app.config["TRANSCRIBE_RUNNER"].get.return_value = None
+    resp = client_with_runners.get("/api/transcribe/notexist")
+    assert resp.status_code == 404
+
+
+def test_delete_transcribe(client_with_runners):
+    resp = client_with_runners.delete("/api/transcribe/def987654321")
+    assert resp.status_code == 200

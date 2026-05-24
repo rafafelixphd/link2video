@@ -1,1 +1,241 @@
-<div class="tab-placeholder">Transcribe — Coming soon</div>
+<div style="padding: 20px;">
+    <h3 style="margin-bottom: 20px;">Transcribe</h3>
+
+    <!-- Input Files Section -->
+    <div style="margin-bottom: 30px;">
+        <h4 style="margin-bottom: 10px;">Input Files & Parameters</h4>
+        <div style="margin-bottom: 10px;">
+            <label>
+                Input Folder:
+                <input type="text" id="trInputFolder" value="./examples/" style="width: 300px; padding: 6px;">
+            </label>
+            <button onclick="trScanFolder()" style="margin-left: 5px;">🔍 Scan</button>
+            <button onclick="document.getElementById('trInputFolder').value='./examples/'" style="margin-left: 8px; background: #6c757d; font-size: 0.85em;">Examples</button>
+            <button onclick="document.getElementById('trInputFolder').value='~/Movies/link2video/'" style="margin-left: 4px; background: #6c757d; font-size: 0.85em;">~/Movies</button>
+            <span id="trScanStatus" style="margin-left: 10px; color: #999; font-size: 0.9em;"></span>
+        </div>
+
+        <div style="margin-bottom: 10px;">
+            <label>
+                Model:
+                <select id="trModel" style="padding: 6px; margin-left: 5px;">
+                    <option value="base" selected>base</option>
+                    <option value="tiny">tiny</option>
+                    <option value="small">small</option>
+                    <option value="medium">medium</option>
+                    <option value="large">large</option>
+                </select>
+            </label>
+            <label style="margin-left: 20px;">
+                Language:
+                <select id="trLanguage" style="padding: 6px; margin-left: 5px;">
+                    <option value="en" selected>English</option>
+                    <option value="pt">Portuguese</option>
+                    <option value="ja">Japanese</option>
+                </select>
+            </label>
+            <label style="margin-left: 20px;">
+                Device:
+                <select id="trDevice" style="padding: 6px; margin-left: 5px;">
+                    <option value="auto" selected>auto</option>
+                    <option value="cpu">cpu</option>
+                    <option value="mps">mps</option>
+                    <option value="cuda">cuda</option>
+                </select>
+            </label>
+        </div>
+
+        <div style="margin-bottom: 10px;">
+            <button id="trProcessBtn" onclick="trSubmitAll()" style="background: #28a745;">📝 Transcribe All</button>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>File</th>
+                    <th style="width: 50px;">Action</th>
+                </tr>
+            </thead>
+            <tbody id="trInputTable"></tbody>
+        </table>
+    </div>
+
+    <!-- Active Runs Section -->
+    <div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h4 style="margin: 0;">Active Runs</h4>
+            <button onclick="trClearAll()" style="background: #dc3545;">🗑️ Clear All</button>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>File</th>
+                    <th style="width: 110px;">Status</th>
+                    <th>Result / Error</th>
+                    <th style="width: 90px;">Action</th>
+                </tr>
+            </thead>
+            <tbody id="trRunsTable"></tbody>
+        </table>
+    </div>
+
+    <script>
+        let trFiles = [];
+        // { runId, videoPath, status, result, error }
+        let trRuns = [];
+        let trPollTimer = null;
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            const d = document.createElement('div');
+            d.textContent = str;
+            return d.innerHTML;
+        }
+
+        async function trScanFolder() {
+            const folder = document.getElementById('trInputFolder').value.trim();
+            if (!folder) { alert('Please enter a folder path'); return; }
+            const status = document.getElementById('trScanStatus');
+            status.textContent = 'Scanning…';
+            try {
+                const resp = await fetch(`/api/scan?path=${encodeURIComponent(folder)}`);
+                const data = await resp.json();
+                if (!resp.ok) { status.textContent = '✗ ' + data.error; return; }
+                if (data.count === 0) { status.textContent = 'No .mov or .mp4 files found'; return; }
+                trFiles = data.files;
+                renderTrInputTable();
+                status.textContent = `✓ ${data.count} file${data.count !== 1 ? 's' : ''} found`;
+            } catch (err) {
+                status.textContent = '✗ ' + err.message;
+            }
+        }
+
+        function trRemoveFile(index) {
+            trFiles.splice(index, 1);
+            renderTrInputTable();
+        }
+
+        function renderTrInputTable() {
+            const tbody = document.getElementById('trInputTable');
+            if (trFiles.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="2" style="text-align: center; color: #999;">No files — scan a folder</td></tr>';
+                return;
+            }
+            tbody.innerHTML = trFiles.map((f, i) => `
+                <tr>
+                    <td><input type="text" value="${escapeHtml(f.input)}" onchange="trFiles[${i}].input = this.value;" style="width: 100%; padding: 4px;"></td>
+                    <td><button class="danger" onclick="trRemoveFile(${i})">Remove</button></td>
+                </tr>
+            `).join('');
+        }
+
+        async function trSubmitAll() {
+            if (trFiles.length === 0) { alert('Please scan a folder first'); return; }
+            const model = document.getElementById('trModel').value;
+            const language = document.getElementById('trLanguage').value;
+            const device = document.getElementById('trDevice').value;
+
+            document.getElementById('trProcessBtn').disabled = true;
+            for (const f of trFiles) {
+                try {
+                    const resp = await fetch('/api/transcribe', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ video_path: f.input, model, language, device }),
+                    });
+                    const data = await resp.json();
+                    if (resp.ok) {
+                        trRuns.push({ runId: data.id, videoPath: f.input, status: 'pending', result: null, error: null });
+                    } else {
+                        trRuns.push({ runId: null, videoPath: f.input, status: 'failed', result: null, error: data.error || 'Submit failed' });
+                    }
+                } catch (err) {
+                    trRuns.push({ runId: null, videoPath: f.input, status: 'failed', result: null, error: err.message });
+                }
+            }
+            trFiles = [];
+            renderTrInputTable();
+            document.getElementById('trProcessBtn').disabled = false;
+            renderTrRuns();
+            trStartPolling();
+        }
+
+        function trStartPolling() {
+            if (trPollTimer) return;
+            trPollTimer = setInterval(trPollRuns, 2000);
+        }
+
+        async function trPollRuns() {
+            const active = trRuns.filter(r => r.runId && (r.status === 'pending' || r.status === 'running'));
+            if (active.length === 0) {
+                clearInterval(trPollTimer);
+                trPollTimer = null;
+                return;
+            }
+            await Promise.all(active.map(async run => {
+                try {
+                    const resp = await fetch('/api/transcribe/' + run.runId);
+                    const data = await resp.json();
+                    if (resp.ok) {
+                        run.status = data.status;
+                        run.result = data.result;
+                        run.error = data.error;
+                    } else {
+                        run.status = 'failed';
+                        run.error = data.error || 'Poll error';
+                    }
+                } catch (err) {
+                    run.status = 'failed';
+                    run.error = err.message;
+                }
+            }));
+            renderTrRuns();
+        }
+
+        function renderTrRuns() {
+            const tbody = document.getElementById('trRunsTable');
+            if (trRuns.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #999;">No runs</td></tr>';
+                return;
+            }
+            tbody.innerHTML = trRuns.map((run, i) => {
+                const badgeClass = run.status === 'completed' ? 'status-complete' : 'status-' + run.status;
+                let detail = '<span style="color: #999;">—</span>';
+                if (run.status === 'completed' && run.result) {
+                    detail = '<span style="color: #28a745;">Saved to ' + escapeHtml(run.result.yaml_path) + '</span>';
+                } else if (run.status === 'failed' && run.error) {
+                    detail = '<span style="color: #dc3545;">' + escapeHtml(run.error) + '</span>';
+                }
+                const isTerminal = run.status === 'completed' || run.status === 'failed';
+                return `
+                    <tr>
+                        <td><small>${escapeHtml(run.videoPath)}</small></td>
+                        <td><span class="status-badge ${badgeClass}">${escapeHtml(run.status)}</span></td>
+                        <td><small>${detail}</small></td>
+                        <td>${isTerminal ? `<button class="danger" onclick="trClearRun(${i})">Clear</button>` : ''}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        async function trClearRun(index) {
+            const run = trRuns[index];
+            if (run.runId) {
+                try { await fetch('/api/transcribe/' + run.runId, { method: 'DELETE' }); } catch (_) {}
+            }
+            trRuns.splice(index, 1);
+            renderTrRuns();
+        }
+
+        async function trClearAll() {
+            await Promise.all(trRuns.filter(r => r.runId).map(r =>
+                fetch('/api/transcribe/' + r.runId, { method: 'DELETE' }).catch(() => {})
+            ));
+            trRuns = [];
+            renderTrRuns();
+        }
+
+        renderTrInputTable();
+        renderTrRuns();
+    </script>
+</div>

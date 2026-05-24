@@ -1,1 +1,207 @@
-<div class="tab-placeholder">Extract Audio — Coming soon</div>
+<div style="padding: 20px;">
+    <h3 style="margin-bottom: 20px;">Extract Audio</h3>
+
+    <!-- Input Files Section -->
+    <div style="margin-bottom: 30px;">
+        <h4 style="margin-bottom: 10px;">Input Files</h4>
+        <div style="margin-bottom: 10px;">
+            <label>
+                Input Folder:
+                <input type="text" id="audioInputFolder" value="./examples/" style="width: 300px; padding: 6px;">
+            </label>
+            <button onclick="audioScanFolder()" style="margin-left: 5px;">🔍 Scan</button>
+            <button onclick="document.getElementById('audioInputFolder').value='./examples/'" style="margin-left: 8px; background: #6c757d; font-size: 0.85em;">Examples</button>
+            <button onclick="document.getElementById('audioInputFolder').value='~/Movies/link2video/'" style="margin-left: 4px; background: #6c757d; font-size: 0.85em;">~/Movies</button>
+            <span id="audioScanStatus" style="margin-left: 10px; color: #999; font-size: 0.9em;"></span>
+        </div>
+
+        <div style="margin-bottom: 10px;">
+            <button id="audioProcessBtn" onclick="audioSubmitAll()" style="background: #28a745;">🎵 Extract All</button>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>File</th>
+                    <th style="width: 50px;">Action</th>
+                </tr>
+            </thead>
+            <tbody id="audioInputTable"></tbody>
+        </table>
+    </div>
+
+    <!-- Active Runs Section -->
+    <div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h4 style="margin: 0;">Active Runs</h4>
+            <button onclick="audioClearAll()" style="background: #dc3545;">🗑️ Clear All</button>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>File</th>
+                    <th style="width: 110px;">Status</th>
+                    <th>Result / Error</th>
+                    <th style="width: 90px;">Action</th>
+                </tr>
+            </thead>
+            <tbody id="audioRunsTable"></tbody>
+        </table>
+    </div>
+
+    <script>
+        let audioFiles = [];
+        // { runId, videoPath, status, result, error }
+        let audioRuns = [];
+        let audioPollTimer = null;
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            const d = document.createElement('div');
+            d.textContent = str;
+            return d.innerHTML;
+        }
+
+        async function audioScanFolder() {
+            const folder = document.getElementById('audioInputFolder').value.trim();
+            if (!folder) { alert('Please enter a folder path'); return; }
+            const status = document.getElementById('audioScanStatus');
+            status.textContent = 'Scanning…';
+            try {
+                const resp = await fetch(`/api/scan?path=${encodeURIComponent(folder)}`);
+                const data = await resp.json();
+                if (!resp.ok) { status.textContent = '✗ ' + data.error; return; }
+                if (data.count === 0) { status.textContent = 'No .mov or .mp4 files found'; return; }
+                audioFiles = data.files;
+                renderAudioInputTable();
+                status.textContent = `✓ ${data.count} file${data.count !== 1 ? 's' : ''} found`;
+            } catch (err) {
+                status.textContent = '✗ ' + err.message;
+            }
+        }
+
+        function audioRemoveFile(index) {
+            audioFiles.splice(index, 1);
+            renderAudioInputTable();
+        }
+
+        function renderAudioInputTable() {
+            const tbody = document.getElementById('audioInputTable');
+            if (audioFiles.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="2" style="text-align: center; color: #999;">No files — scan a folder</td></tr>';
+                return;
+            }
+            tbody.innerHTML = audioFiles.map((f, i) => `
+                <tr>
+                    <td><input type="text" value="${escapeHtml(f.input)}" onchange="audioFiles[${i}].input = this.value;" style="width: 100%; padding: 4px;"></td>
+                    <td><button class="danger" onclick="audioRemoveFile(${i})">Remove</button></td>
+                </tr>
+            `).join('');
+        }
+
+        async function audioSubmitAll() {
+            if (audioFiles.length === 0) { alert('Please scan a folder first'); return; }
+            document.getElementById('audioProcessBtn').disabled = true;
+            for (const f of audioFiles) {
+                try {
+                    const resp = await fetch('/api/audio', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ video_path: f.input }),
+                    });
+                    const data = await resp.json();
+                    if (resp.ok) {
+                        audioRuns.push({ runId: data.id, videoPath: f.input, status: 'pending', result: null, error: null });
+                    } else {
+                        audioRuns.push({ runId: null, videoPath: f.input, status: 'failed', result: null, error: data.error || 'Submit failed' });
+                    }
+                } catch (err) {
+                    audioRuns.push({ runId: null, videoPath: f.input, status: 'failed', result: null, error: err.message });
+                }
+            }
+            audioFiles = [];
+            renderAudioInputTable();
+            document.getElementById('audioProcessBtn').disabled = false;
+            renderAudioRuns();
+            audioStartPolling();
+        }
+
+        function audioStartPolling() {
+            if (audioPollTimer) return;
+            audioPollTimer = setInterval(audioPollRuns, 2000);
+        }
+
+        async function audioPollRuns() {
+            const active = audioRuns.filter(r => r.runId && (r.status === 'pending' || r.status === 'running'));
+            if (active.length === 0) {
+                clearInterval(audioPollTimer);
+                audioPollTimer = null;
+                return;
+            }
+            await Promise.all(active.map(async run => {
+                try {
+                    const resp = await fetch('/api/audio/' + run.runId);
+                    const data = await resp.json();
+                    if (resp.ok) {
+                        run.status = data.status;
+                        run.result = data.result;
+                        run.error = data.error;
+                    } else {
+                        run.status = 'failed';
+                        run.error = data.error || 'Poll error';
+                    }
+                } catch (err) {
+                    run.status = 'failed';
+                    run.error = err.message;
+                }
+            }));
+            renderAudioRuns();
+        }
+
+        function renderAudioRuns() {
+            const tbody = document.getElementById('audioRunsTable');
+            if (audioRuns.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #999;">No runs</td></tr>';
+                return;
+            }
+            tbody.innerHTML = audioRuns.map((run, i) => {
+                const badgeClass = run.status === 'completed' ? 'status-complete' : 'status-' + run.status;
+                let detail = '<span style="color: #999;">—</span>';
+                if (run.status === 'completed' && run.result) {
+                    detail = '<span style="color: #28a745;">' + escapeHtml(run.result.mp3_path) + '</span>';
+                } else if (run.status === 'failed' && run.error) {
+                    detail = '<span style="color: #dc3545;">' + escapeHtml(run.error) + '</span>';
+                }
+                const isTerminal = run.status === 'completed' || run.status === 'failed';
+                return `
+                    <tr>
+                        <td><small>${escapeHtml(run.videoPath)}</small></td>
+                        <td><span class="status-badge ${badgeClass}">${escapeHtml(run.status)}</span></td>
+                        <td><small>${detail}</small></td>
+                        <td>${isTerminal ? `<button class="danger" onclick="audioClearRun(${i})">Clear</button>` : ''}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        async function audioClearRun(index) {
+            const run = audioRuns[index];
+            if (run.runId) {
+                try { await fetch('/api/audio/' + run.runId, { method: 'DELETE' }); } catch (_) {}
+            }
+            audioRuns.splice(index, 1);
+            renderAudioRuns();
+        }
+
+        async function audioClearAll() {
+            await Promise.all(audioRuns.filter(r => r.runId).map(r =>
+                fetch('/api/audio/' + r.runId, { method: 'DELETE' }).catch(() => {})
+            ));
+            audioRuns = [];
+            renderAudioRuns();
+        }
+
+        renderAudioInputTable();
+        renderAudioRuns();
+    </script>
+</div>
