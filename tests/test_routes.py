@@ -86,3 +86,75 @@ def test_scan_folder_empty(client, tmp_path):
     data = resp.get_json()
     assert data["count"] == 0
     assert data["files"] == []
+
+
+# ── Download route tests ──────────────────────────────────────────────────────
+
+def test_start_download_no_body(client):
+    resp = client.post("/api/download")
+    assert resp.status_code in (400, 415)
+
+
+def test_start_download_missing_url(client):
+    resp = client.post("/api/download", json={"save_path": "/tmp/out"})
+    assert resp.status_code == 400
+    assert "url" in resp.get_json()["error"]
+
+
+def test_start_download_missing_save_path(client):
+    resp = client.post("/api/download", json={"url": "https://youtube.com/watch?v=abc"})
+    assert resp.status_code == 400
+    assert "save_path" in resp.get_json()["error"]
+
+
+def test_start_download_returns_id(client):
+    from unittest.mock import patch
+    with patch("app.download_runner.detect_platform") as mock:
+        mock.return_value.download.return_value = (True, "/out/video.mp4")
+        resp = client.post("/api/download", json={
+            "url": "https://youtube.com/watch?v=abc",
+            "save_path": "/tmp/out",
+        })
+    assert resp.status_code == 201
+    data = resp.get_json()
+    assert "id" in data
+    assert isinstance(data["id"], str)
+
+
+def test_get_download_not_found(client):
+    resp = client.get("/api/download/nonexistent_run_id")
+    assert resp.status_code == 404
+
+
+def test_get_download_status(client):
+    from unittest.mock import patch
+    with patch("app.download_runner.detect_platform") as mock:
+        mock.return_value.download.return_value = (True, "/out/video.mp4")
+        post_resp = client.post("/api/download", json={
+            "url": "https://youtube.com/watch?v=abc",
+            "save_path": "/tmp/out",
+        })
+    run_id = post_resp.get_json()["id"]
+    resp = client.get(f"/api/download/{run_id}")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert "status" in data
+    assert data["status"] in ("pending", "running", "completed", "failed")
+    assert "result" in data
+    assert "error" in data
+
+
+def test_clear_download(client):
+    from unittest.mock import patch
+    with patch("app.download_runner.detect_platform") as mock:
+        mock.return_value.download.return_value = (True, "/out/video.mp4")
+        post_resp = client.post("/api/download", json={
+            "url": "https://youtube.com/watch?v=abc",
+            "save_path": "/tmp/out",
+        })
+    run_id = post_resp.get_json()["id"]
+    resp = client.delete(f"/api/download/{run_id}")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"status": "cleared"}
+    # confirm it's gone
+    assert client.get(f"/api/download/{run_id}").status_code == 404
