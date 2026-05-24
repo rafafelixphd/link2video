@@ -39,7 +39,7 @@ def create_metadata(
 def save_metadata(
     filename: str,
     url: str,
-    tags: Optional[List[str]] = None,
+    tags=None,
     comments: str = ""
 ) -> str:
     """
@@ -49,52 +49,26 @@ def save_metadata(
     The metadata filename is derived from the video filename without its extension.
 
     Args:
-        filename (str): The path to the video file (used to determine save location)
+        filename (str): The path to the video file
         url (str): The URL of the video source
-        tags (Optional[List[str]]): List of tags for categorization (default: None)
-        comments (str): Additional comments or notes about the video (default: "")
+        tags (Optional[List[str]]): List of tags (default: None)
+        comments (str): Additional comments (default: "")
 
     Returns:
         str: The path to the saved metadata file
 
     Raises:
-        ValueError: If url is empty or None, or if filename is empty
-        PermissionError: If the metadata directory cannot be created or written to
+        ValueError: If url or filename is empty
     """
     if not filename:
         raise ValueError("Filename cannot be empty")
-
     if not url or not url.strip():
         raise ValueError("URL cannot be empty")
 
-    # Get the directory containing the video file
-    video_path = Path(filename)
-    video_dir = video_path.parent
-    video_basename = video_path.stem  # Filename without extension
-
-    # Save metadata in the same directory as the video
-    metadata_dir = video_dir
-
-    try:
-        metadata_dir.mkdir(exist_ok=True)
-    except PermissionError as e:
-        raise PermissionError(f"Permission denied creating metadata directory: {metadata_dir}") from e
-    except OSError as e:
-        raise PermissionError(f"Error creating metadata directory: {metadata_dir}") from e
-
-    # Create the metadata dictionary
-    metadata = create_metadata(url, tags, comments)
-
-    # Build the metadata file path
-    metadata_file = metadata_dir / f"{video_basename}.yaml"
-
-    # Write metadata to YAML file
-    try:
-        with open(metadata_file, 'w') as file:
-            yaml.safe_dump(metadata, file, default_flow_style=False)
-    except PermissionError as e:
-        raise PermissionError(f"Permission denied writing metadata file: {metadata_file}") from e
-    except OSError as e:
-        raise PermissionError(f"Error writing metadata file: {metadata_file}") from e
-
-    return str(metadata_file)
+    from link2video.metadata_manager import MetadataManager
+    mgr = MetadataManager()
+    return mgr.update(filename, "link2video/download", {
+        "url": url,
+        "tags": tags or [],
+        "comments": comments,
+    })
