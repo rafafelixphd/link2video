@@ -51,6 +51,7 @@
             <button class="tab active" onclick="switchTab('segment')">Segment</button>
             <button class="tab" onclick="switchTab('extract-audio')">Extract Audio</button>
             <button class="tab" onclick="switchTab('transcribe')">Transcribe</button>
+            <button class="tab" onclick="switchTab('download')">Download</button>
         </div>
 
         <div id="segment" class="tab-content active">
@@ -63,6 +64,10 @@
 
         <div id="transcribe" class="tab-content">
             {% include "transcribe.html" %}
+        </div>
+
+        <div id="download" class="tab-content">
+            {% include "download.html" %}
         </div>
     </div>
 
