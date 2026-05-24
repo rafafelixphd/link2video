@@ -92,7 +92,7 @@ def test_scan_folder_empty(client, tmp_path):
 
 def test_start_download_no_body(client):
     resp = client.post("/api/download")
-    assert resp.status_code in (400, 415)
+    assert resp.status_code == 400
 
 
 def test_start_download_missing_url(client):

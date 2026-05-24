@@ -113,7 +113,7 @@ def _download_runner():
 @jobs_bp.route("/api/download", methods=["POST"])
 def start_download():
     """Start a background video download."""
-    data = request.get_json()
+    data = request.get_json(force=True, silent=True)
     if data is None:
         return jsonify({"error": "Request must be JSON"}), 400
     url = (data.get("url") or "").strip()
