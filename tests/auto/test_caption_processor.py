@@ -1,5 +1,5 @@
 import subprocess
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from link2video.auto.caption.models import CaptionResult
 from link2video.auto.caption.processor import CaptionProcessor
@@ -54,3 +54,48 @@ def test_encode_frame_returns_base64_string(tmp_path):
     result = processor._encode_frame(str(img))
     import base64
     assert base64.b64decode(result) == b"\xff\xd8\xff"
+
+
+def test_call_ollama_returns_text():
+    processor = CaptionProcessor(ollama_url="http://fake")
+    fake_response = MagicMock()
+    fake_response.__getitem__ = lambda self, key: "Frame 1: A desk.\nFrame 2: A chair." if key == "response" else None
+    with patch.object(processor._client, "generate", return_value={"response": "Frame 1: A desk.\nFrame 2: A chair."}) as mock_gen:
+        text = processor._call_ollama(
+            model="llava",
+            prompt="describe",
+            images=["aGVsbG8=", "d29ybGQ="],
+        )
+    assert text == "Frame 1: A desk.\nFrame 2: A chair."
+    mock_gen.assert_called_once_with(
+        model="llava",
+        prompt="describe",
+        images=["aGVsbG8=", "d29ybGQ="],
+    )
+
+
+def test_call_ollama_no_images():
+    processor = CaptionProcessor(ollama_url="http://fake")
+    with patch.object(processor._client, "generate", return_value={"response": "Summary."}) as mock_gen:
+        text = processor._call_ollama(model="llava", prompt="summarize")
+    call_kwargs = mock_gen.call_args[1]
+    assert "images" not in call_kwargs
+
+
+def test_parse_frame_descriptions_extracts_one_per_frame():
+    processor = CaptionProcessor(ollama_url="http://fake")
+    text = "Frame 1: A person sits.\nFrame 2: They gesture.\nFrame 3: Close-up of screen."
+    result = processor._parse_frame_descriptions(text, expected_count=3)
+    assert result == [
+        "A person sits.",
+        "They gesture.",
+        "Close-up of screen.",
+    ]
+
+
+def test_parse_frame_descriptions_fills_parse_errors():
+    processor = CaptionProcessor(ollama_url="http://fake")
+    text = "Frame 1: Hello.\nFrame 2: World."
+    result = processor._parse_frame_descriptions(text, expected_count=3)
+    assert len(result) == 3
+    assert result[2] == "[parse error]"

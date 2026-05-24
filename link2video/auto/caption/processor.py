@@ -1,4 +1,6 @@
+# link2video/auto/caption/processor.py
 import base64
+import re
 import subprocess
 from pathlib import Path
 
@@ -35,3 +37,18 @@ class CaptionProcessor:
     def _encode_frame(self, frame_path: str) -> str:
         with open(frame_path, "rb") as f:
             return base64.b64encode(f.read()).decode("utf-8")
+
+    def _call_ollama(self, model: str, prompt: str, images: list | None = None) -> str:
+        kwargs = {"model": model, "prompt": prompt}
+        if images:
+            kwargs["images"] = images
+        response = self._client.generate(**kwargs)
+        return response["response"]
+
+    def _parse_frame_descriptions(self, text: str, expected_count: int) -> list:
+        pattern = re.compile(r"Frame\s+\d+:\s*(.+?)(?=Frame\s+\d+:|$)", re.DOTALL | re.IGNORECASE)
+        matches = pattern.findall(text)
+        descriptions = [m.strip() for m in matches]
+        while len(descriptions) < expected_count:
+            descriptions.append("[parse error]")
+        return descriptions[:expected_count]
