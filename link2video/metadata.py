@@ -45,7 +45,7 @@ def save_metadata(
     """
     Save metadata for a video as a YAML file.
 
-    The metadata is saved in a 'metadata/' subdirectory relative to the provided filename.
+    The metadata is saved alongside the video file in the same directory.
     The metadata filename is derived from the video filename without its extension.
 
     Args:
@@ -72,8 +72,8 @@ def save_metadata(
     video_dir = video_path.parent
     video_basename = video_path.stem  # Filename without extension
 
-    # Create metadata directory
-    metadata_dir = video_dir / "metadata"
+    # Save metadata in the same directory as the video
+    metadata_dir = video_dir
 
     try:
         metadata_dir.mkdir(exist_ok=True)
