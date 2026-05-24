@@ -1,8 +1,11 @@
 from dataclasses import dataclass, field
+from typing import Any, Dict
 
 
 @dataclass
 class CaptionResult:
+    """Result of a captioning run — per-frame descriptions plus a global summary."""
+
     global_summary: str
     model: str
     interval_seconds: float
@@ -11,7 +14,7 @@ class CaptionResult:
     units: list
     context_used: list = field(default_factory=list)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> Dict[str, Any]:
         return {
             "global": self.global_summary,
             "model": self.model,
