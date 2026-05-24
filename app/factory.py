@@ -1,8 +1,8 @@
 """Flask application factory."""
 from flask import Flask, request
 
-from job_manager import JobManager
-from routes import jobs_bp
+from .job_manager import JobManager
+from .routes import jobs_bp
 
 
 def create_app(jobs_dir: str = "app/.jobs") -> Flask:

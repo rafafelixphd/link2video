@@ -8,6 +8,7 @@ import contextlib
 import fcntl
 import json
 import os
+import signal
 import uuid
 from concurrent.futures import ProcessPoolExecutor, Future
 from datetime import datetime, timezone
@@ -22,6 +23,11 @@ from link2video.auto.split.silent import SilenceSplitter
 # ---------------------------------------------------------------------------
 
 MAX_WORKERS = 8
+
+
+def _worker_init() -> None:
+    """Worker process initializer — ignore SIGINT so the main process handles shutdown."""
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
 # ---------------------------------------------------------------------------
@@ -120,7 +126,7 @@ class JobManager:
     def __init__(self, jobs_dir: str = "app/.jobs") -> None:
         self.jobs_dir = Path(jobs_dir)
         self.jobs_dir.mkdir(parents=True, exist_ok=True)
-        self._executor = ProcessPoolExecutor(max_workers=MAX_WORKERS)
+        self._executor = ProcessPoolExecutor(max_workers=MAX_WORKERS, initializer=_worker_init)
         self._futures: Dict[Tuple[str, int], Future] = {}
 
     def recover(self) -> None:
@@ -248,6 +254,8 @@ class JobManager:
                     for file_index, file_info in enumerate(job["files"]):
                         if file_info["status"] != "pending":
                             continue
+                        if (job["id"], file_index) in self._futures:
+                            continue  # Already submitted, worker hasn't written "running" yet
 
                         if not Path(file_info["input"]).is_file():
                             file_info["status"] = "failed"
