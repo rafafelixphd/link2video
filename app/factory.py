@@ -1,6 +1,7 @@
 """Flask application factory."""
 from flask import Flask, request
 
+from download_runner import DownloadRunner
 from job_manager import JobManager
 from routes import jobs_bp
 
@@ -12,6 +13,8 @@ def create_app(jobs_dir: str = "app/.jobs") -> Flask:
     job_manager = JobManager(jobs_dir=jobs_dir)
     job_manager.recover()
     app.config["JOB_MANAGER"] = job_manager
+
+    app.config["DOWNLOAD_RUNNER"] = DownloadRunner()
 
     app.register_blueprint(jobs_bp)
 
