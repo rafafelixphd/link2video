@@ -99,3 +99,94 @@ def test_parse_frame_descriptions_fills_parse_errors():
     result = processor._parse_frame_descriptions(text, expected_count=3)
     assert len(result) == 3
     assert result[2] == "[parse error]"
+
+
+import tempfile
+import yaml
+from pathlib import Path
+
+
+def _make_fake_frames(out_dir: str, count: int) -> None:
+    """Write minimal JPEG bytes as fake frame files."""
+    for i in range(1, count + 1):
+        (Path(out_dir) / f"frame_{i:04d}.jpg").write_bytes(b"\xff\xd8\xff\xe0")
+
+
+def test_caption_writes_yaml(tmp_path):
+    video = tmp_path / "myvideo.mp4"
+    video.touch()
+
+    processor = CaptionProcessor(ollama_url="http://fake")
+
+    ollama_responses = iter([
+        "Frame 1: Person at desk.\nFrame 2: Whiteboard shown.\nFrame 3: Close-up.",
+        "An educational video about software.",
+    ])
+
+    def fake_call_ollama(model, prompt, images=None):
+        return next(ollama_responses)
+
+    with patch.object(processor, "_get_video_duration", return_value=3.0), \
+         patch.object(processor, "_extract_frames", side_effect=lambda v, d, i: _make_fake_frames(d, 3)), \
+         patch.object(processor, "_call_ollama", side_effect=fake_call_ollama):
+        result = processor.caption(
+            video_path=str(video),
+            interval_seconds=1.0,
+            sequence_length=3,
+            model="llava",
+        )
+
+    assert len(result.units) == 3
+    assert result.units[0] == {"timestamp": 0.0, "description": "Person at desk."}
+    assert result.units[1] == {"timestamp": 1.0, "description": "Whiteboard shown."}
+    assert result.units[2] == {"timestamp": 2.0, "description": "Close-up."}
+    assert result.global_summary == "An educational video about software."
+    assert result.length_seconds == 3.0
+
+    yaml_path = tmp_path / "myvideo.yaml"
+    assert yaml_path.exists()
+    data = yaml.safe_load(yaml_path.read_text())
+    assert "link2video/auto/caption" in data
+    assert data["link2video/auto/caption"]["global"] == "An educational video about software."
+
+
+def test_caption_dry_run_returns_empty_result(tmp_path):
+    video = tmp_path / "v.mp4"
+    video.touch()
+    processor = CaptionProcessor(ollama_url="http://fake")
+    result = processor.caption(str(video), dry_run=True)
+    assert result.global_summary == ""
+    assert result.units == []
+
+
+def test_caption_includes_yaml_context_in_prompt(tmp_path):
+    video = tmp_path / "v.mp4"
+    video.touch()
+    yaml_path = tmp_path / "v.yaml"
+    yaml_path.write_text(
+        "link2video/auto/transcribe:\n  text: Hello world\n"
+        "link2video/download:\n  comments: Great video\n"
+    )
+
+    processor = CaptionProcessor(ollama_url="http://fake")
+    prompts_seen = []
+
+    def fake_call_ollama(model, prompt, images=None):
+        prompts_seen.append(prompt)
+        if images:
+            return "Frame 1: Something."
+        return "Summary."
+
+    with patch.object(processor, "_get_video_duration", return_value=1.0), \
+         patch.object(processor, "_extract_frames", side_effect=lambda v, d, i: _make_fake_frames(d, 1)), \
+         patch.object(processor, "_call_ollama", side_effect=fake_call_ollama):
+        processor.caption(
+            str(video),
+            interval_seconds=1.0,
+            sequence_length=3,
+            model="llava",
+            context_sections=["transcription", "comments"],
+        )
+
+    assert any("Hello world" in p for p in prompts_seen)
+    assert any("Great video" in p for p in prompts_seen)
