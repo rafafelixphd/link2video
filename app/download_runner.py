@@ -35,12 +35,16 @@ class DownloadRunner:
 
     def _run(self, run_id: str, url: str, save_path: str, tags: List[str], comments: str) -> None:
         with self._lock:
+            if run_id not in self._runs:
+                return
             self._runs[run_id]["status"] = "running"
         try:
             Path(save_path).expanduser().mkdir(parents=True, exist_ok=True)
             downloader = detect_platform(url)
             success, result = downloader.download(url, save_path, tags=tags, comments=comments)
             with self._lock:
+                if run_id not in self._runs:
+                    return
                 if success:
                     self._runs[run_id]["status"] = "completed"
                     self._runs[run_id]["result"] = result
@@ -49,5 +53,7 @@ class DownloadRunner:
                     self._runs[run_id]["error"] = result
         except Exception as exc:
             with self._lock:
+                if run_id not in self._runs:
+                    return
                 self._runs[run_id]["status"] = "failed"
                 self._runs[run_id]["error"] = str(exc)
