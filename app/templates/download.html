@@ -1,0 +1,140 @@
+<div style="padding: 20px;">
+    <h3 style="margin-bottom: 20px;">Download Video</h3>
+
+    <!-- Form Section -->
+    <div style="margin-bottom: 30px;">
+        <h4 style="margin-bottom: 10px;">URL & Settings</h4>
+
+        <div style="margin-bottom: 10px;">
+            <label>
+                URL:
+                <input type="text" id="dlUrl" placeholder="https://www.youtube.com/watch?v=..."
+                       style="width: 500px; padding: 6px; margin-left: 5px;">
+            </label>
+        </div>
+
+        <div style="margin-bottom: 10px;">
+            <label>
+                Output Directory:
+                <input type="text" id="dlSavePath" value="~/Movies/link2video"
+                       style="width: 400px; padding: 6px; margin-left: 5px;">
+            </label>
+        </div>
+
+        <div style="margin-bottom: 10px;">
+            <label>
+                Tags:
+                <input type="text" id="dlTags" placeholder="tutorial, python (optional)"
+                       style="width: 400px; padding: 6px; margin-left: 5px;">
+            </label>
+        </div>
+
+        <div style="margin-bottom: 10px;">
+            <label style="vertical-align: top;">
+                Comments:
+                <textarea id="dlComments" placeholder="Notes about this video (optional)"
+                          style="width: 400px; height: 80px; padding: 6px; margin-left: 5px;"></textarea>
+            </label>
+        </div>
+
+        <button onclick="startDownload()" style="background: #28a745;">⬇ Download</button>
+    </div>
+
+    <!-- Status Section -->
+    <div id="dlStatusSection" style="display: none;">
+        <h4 style="margin-bottom: 10px;">Status</h4>
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 120px;">Status</th>
+                    <th>Result / Error</th>
+                    <th style="width: 100px;">Action</th>
+                </tr>
+            </thead>
+            <tbody id="dlStatusBody"></tbody>
+        </table>
+    </div>
+
+    <script>
+        let dlRunId = null;
+        let dlPollInterval = null;
+
+        async function startDownload() {
+            const url = document.getElementById('dlUrl').value.trim();
+            const savePath = document.getElementById('dlSavePath').value.trim();
+            const tagsRaw = document.getElementById('dlTags').value.trim();
+            const comments = document.getElementById('dlComments').value.trim();
+
+            if (!url) { alert('URL is required'); return; }
+            if (!savePath) { alert('Output directory is required'); return; }
+
+            const tags = tagsRaw
+                ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean)
+                : [];
+
+            try {
+                const resp = await fetch('/api/download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url, save_path: savePath, tags, comments }),
+                });
+                const data = await resp.json();
+                if (!resp.ok) { alert('Error: ' + data.error); return; }
+                dlRunId = data.id;
+                renderStatus('pending', null, null);
+                startDlPolling();
+            } catch (err) {
+                alert('Error: ' + err.message);
+            }
+        }
+
+        function startDlPolling() {
+            if (dlPollInterval) clearInterval(dlPollInterval);
+            dlPollInterval = setInterval(async () => {
+                if (!dlRunId) return;
+                try {
+                    const resp = await fetch('/api/download/' + dlRunId);
+                    const data = await resp.json();
+                    renderStatus(data.status, data.result, data.error);
+                    if (data.status === 'completed' || data.status === 'failed') {
+                        clearInterval(dlPollInterval);
+                        dlPollInterval = null;
+                    }
+                } catch (err) {
+                    console.error('Poll error:', err);
+                }
+            }, 2000);
+        }
+
+        function renderStatus(status, result, error) {
+            document.getElementById('dlStatusSection').style.display = 'block';
+
+            const badgeClass = status === 'completed' ? 'status-complete' : 'status-' + status;
+            let detail = '<span style="color: #999;">—</span>';
+            if (status === 'completed' && result) {
+                detail = '<span style="color: #28a745;">' + result + '</span>';
+            } else if (status === 'failed' && error) {
+                detail = '<span style="color: #dc3545;">' + error + '</span>';
+            }
+
+            const isTerminal = status === 'completed' || status === 'failed';
+            document.getElementById('dlStatusBody').innerHTML = `
+                <tr>
+                    <td><span class="status-badge ${badgeClass}">${status}</span></td>
+                    <td><small>${detail}</small></td>
+                    <td>${isTerminal ? '<button class="danger" onclick="clearDlStatus()">Clear</button>' : ''}</td>
+                </tr>
+            `;
+        }
+
+        async function clearDlStatus() {
+            if (dlRunId) {
+                await fetch('/api/download/' + dlRunId, { method: 'DELETE' });
+                dlRunId = null;
+            }
+            if (dlPollInterval) { clearInterval(dlPollInterval); dlPollInterval = null; }
+            document.getElementById('dlStatusSection').style.display = 'none';
+            document.getElementById('dlStatusBody').innerHTML = '';
+        }
+    </script>
+</div>
