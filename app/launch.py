@@ -2,7 +2,7 @@
 """Batch Processor — web UI launcher."""
 import argparse
 
-from app.factory import create_app
+from factory import create_app
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Batch Segment Processor")
