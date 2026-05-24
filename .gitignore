@@ -352,3 +352,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Batch processor job queue
+app/.jobs/
