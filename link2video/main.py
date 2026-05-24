@@ -220,7 +220,7 @@ def _run_gui_downloader(args):
                 print(f"  Tags: {', '.join(tags)}")
             if comments:
                 print(f"  Notes: {comments}")
-            print(f"\nMetadata file created: {os.path.dirname(filepath)}/metadata/")
+            print(f"\nMetadata file created: {os.path.splitext(filepath)[0]}.yaml")
         else:
             print(f"Error: {result}")
 
