@@ -1,12 +1,6 @@
 #!/usr/bin/env python3
 """Batch Processor — web UI launcher."""
 import argparse
-import sys
-from pathlib import Path
-
-# Ensure project root is on sys.path so `app` is importable when
-# this script is run directly (e.g. `python app/launch.py`).
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.factory import create_app
 
