@@ -59,6 +59,47 @@ All dependencies are listed in `requirements.txt`:
 - `PyYAML` - Metadata handling
 - `colored` - Colored terminal output
 
+---
+
+## Batch Segment Processor (Web UI)
+
+A Flask web interface for batch-processing video/audio files through the silence splitter.
+
+### Setup
+
+Install the package first (required — the web app uses `link2video` as a library):
+
+```bash
+pip install -e .
+```
+
+### Launch
+
+```bash
+python app/launch.py
+```
+
+Options:
+
+```
+--host       Host to bind to (default: 0.0.0.0)
+--port       Port to listen on (default: 5123)
+--debug      Enable Flask debug mode
+--jobs-dir   Directory for job JSON files (default: app/.jobs)
+```
+
+Then open `http://localhost:5123` in your browser.
+
+### Running the Tests
+
+```bash
+pytest tests/test_job_manager.py tests/test_routes.py -v
+```
+
+Expected output: 12 tests passing.
+
+---
+
 ## License
 
 This project is licensed under the Apache License 2.0 - see the LICENSE file for details.
