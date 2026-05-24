@@ -26,7 +26,7 @@ def scan_folder():
     if not folder:
         return jsonify({"error": "path parameter is required"}), 400
 
-    folder_path = Path(folder)
+    folder_path = Path(folder).expanduser()
     if not folder_path.is_dir():
         return jsonify({"error": f"Not a directory: {folder}"}), 400
 
