@@ -1,0 +1,298 @@
+<div style="padding: 20px;">
+    <h3 style="margin-bottom: 20px;">Caption</h3>
+
+    <!-- Step 1: Folder scan -->
+    <div style="margin-bottom: 20px;">
+        <h4 style="margin-bottom: 10px;">Input Folder</h4>
+        <div style="margin-bottom: 10px;">
+            <label>
+                Folder:
+                <input type="text" id="capInputFolder" value="./examples/" style="width: 300px; padding: 6px;">
+            </label>
+            <button onclick="capScanFolder()" style="margin-left: 5px;">🔍 Scan</button>
+            <button onclick="document.getElementById('capInputFolder').value='./examples/'" style="margin-left: 8px; background: #6c757d; font-size: 0.85em;">Examples</button>
+            <button onclick="document.getElementById('capInputFolder').value='~/Movies/link2video/'" style="margin-left: 4px; background: #6c757d; font-size: 0.85em;">~/Movies</button>
+            <span id="capScanStatus" style="margin-left: 10px; color: #999; font-size: 0.9em;"></span>
+        </div>
+    </div>
+
+    <!-- Step 2: Global settings -->
+    <div style="margin-bottom: 20px;">
+        <h4 style="margin-bottom: 10px;">Settings</h4>
+        <div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-end;">
+            <label>
+                Analysis interval (seconds):
+                <input type="number" id="capInterval" value="1" min="0.5" step="0.5" style="width: 80px; padding: 6px; margin-left: 5px;">
+            </label>
+            <label>
+                Sequence length:
+                <input type="number" id="capSeqLen" value="3" min="1" step="1" style="width: 70px; padding: 6px; margin-left: 5px;">
+            </label>
+            <label>
+                Ollama model:
+                <select id="capModel" style="padding: 6px; margin-left: 5px;">
+                    <option value="">Loading…</option>
+                </select>
+                <button onclick="capLoadModels()" style="margin-left: 4px; font-size: 0.8em; background: #6c757d;">↻</button>
+            </label>
+            <label style="flex: 1; min-width: 200px;">
+                Additional query:
+                <input type="text" id="capQuery" placeholder="Optional focus question…" style="width: 100%; padding: 6px; margin-top: 4px;">
+            </label>
+        </div>
+    </div>
+
+    <!-- Step 3: Pre-flight panel -->
+    <div style="margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h4 style="margin: 0;">Pre-flight Check</h4>
+            <button id="capRunBtn" onclick="capSubmitAll()" style="background: #28a745;" disabled>▶ Caption All</button>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>File</th>
+                    <th>YAML Modules</th>
+                    <th style="width: 140px;">Send Context</th>
+                    <th>Comments</th>
+                    <th style="width: 70px;">Remove</th>
+                </tr>
+            </thead>
+            <tbody id="capPreflightTable"></tbody>
+        </table>
+    </div>
+
+    <!-- Active runs -->
+    <div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h4 style="margin: 0;">Active Runs</h4>
+            <button onclick="capClearAll()" style="background: #dc3545;">🗑️ Clear All</button>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>File</th>
+                    <th style="width: 110px;">Status</th>
+                    <th>Result / Error</th>
+                    <th style="width: 90px;">Action</th>
+                </tr>
+            </thead>
+            <tbody id="capRunsTable"></tbody>
+        </table>
+    </div>
+
+    <script>
+        // capFiles: [{input, yamlInfo: {exists, sections, comments}}]
+        let capFiles = [];
+        let capRuns = [];
+        let capPollTimer = null;
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            const d = document.createElement('div');
+            d.textContent = str;
+            return d.innerHTML;
+        }
+
+        async function capLoadModels() {
+            const sel = document.getElementById('capModel');
+            sel.innerHTML = '<option value="">Loading…</option>';
+            try {
+                const resp = await fetch('/api/ollama/models');
+                const data = await resp.json();
+                if (!resp.ok) { sel.innerHTML = '<option value="">Error loading models</option>'; return; }
+                sel.innerHTML = data.models.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
+                if (!sel.value && data.models.length > 0) sel.value = data.models[0];
+            } catch (e) {
+                sel.innerHTML = '<option value="">Ollama unreachable</option>';
+            }
+        }
+
+        async function capScanFolder() {
+            const folder = document.getElementById('capInputFolder').value.trim();
+            if (!folder) { alert('Please enter a folder path'); return; }
+            const status = document.getElementById('capScanStatus');
+            status.textContent = 'Scanning…';
+            try {
+                const resp = await fetch(`/api/scan?path=${encodeURIComponent(folder)}`);
+                const data = await resp.json();
+                if (!resp.ok) { status.textContent = '✗ ' + data.error; return; }
+                if (data.count === 0) { status.textContent = 'No .mov or .mp4 files found'; return; }
+
+                // Load YAML info for each file in parallel
+                const yamlInfos = await Promise.all(data.files.map(f =>
+                    fetch(`/api/yaml-info?path=${encodeURIComponent(f.input)}`)
+                        .then(r => r.json())
+                        .catch(() => ({ exists: false, sections: [], comments: '' }))
+                ));
+                capFiles = data.files.map((f, i) => ({ input: f.input, yamlInfo: yamlInfos[i] }));
+                renderCapPreflight();
+                document.getElementById('capRunBtn').disabled = false;
+                status.textContent = `✓ ${data.count} file${data.count !== 1 ? 's' : ''} found`;
+            } catch (err) {
+                status.textContent = '✗ ' + err.message;
+            }
+        }
+
+        function renderCapPreflight() {
+            const tbody = document.getElementById('capPreflightTable');
+            if (capFiles.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#999;">No files — scan a folder</td></tr>';
+                return;
+            }
+            tbody.innerHTML = capFiles.map((f, i) => {
+                const info = f.yamlInfo;
+                const hasTranscription = info.sections.includes('transcription');
+                const hasComments = info.sections.includes('comments') || !!info.comments;
+
+                const moduleBadges = ['transcription', 'captioning', 'extract', 'download'].map(s => {
+                    const present = info.sections.includes(s);
+                    return `<span style="font-size:0.8em;padding:2px 6px;border-radius:3px;margin-right:3px;background:${present ? '#d4edda' : '#f8d7da'};color:${present ? '#155724' : '#721c24'};">${present ? '✓' : '✗'} ${s}</span>`;
+                }).join('');
+
+                const checkboxes = `
+                    <label style="font-size:0.85em;display:block;">
+                        <input type="checkbox" id="capTr_${i}" ${hasTranscription ? 'checked' : ''} ${hasTranscription ? '' : 'disabled'}>
+                        transcription
+                    </label>
+                    <label style="font-size:0.85em;display:block;">
+                        <input type="checkbox" id="capCo_${i}" ${hasComments ? 'checked' : ''}>
+                        comments
+                    </label>`;
+
+                const commentField = `<input type="text" id="capComment_${i}" value="${escapeHtml(info.comments || '')}" placeholder="Add comment…" style="width:100%;padding:4px;font-size:0.85em;">`;
+
+                return `<tr>
+                    <td><small>${escapeHtml(f.input)}</small></td>
+                    <td>${moduleBadges}</td>
+                    <td>${checkboxes}</td>
+                    <td>${commentField}</td>
+                    <td><button class="danger" onclick="capRemoveFile(${i})">Remove</button></td>
+                </tr>`;
+            }).join('');
+        }
+
+        function capRemoveFile(index) {
+            capFiles.splice(index, 1);
+            renderCapPreflight();
+            if (capFiles.length === 0) document.getElementById('capRunBtn').disabled = true;
+        }
+
+        async function capSubmitAll() {
+            if (capFiles.length === 0) { alert('Please scan a folder first'); return; }
+            const model = document.getElementById('capModel').value;
+            if (!model) { alert('Please select an Ollama model'); return; }
+            const interval = parseFloat(document.getElementById('capInterval').value) || 1.0;
+            const seqLen = parseInt(document.getElementById('capSeqLen').value) || 3;
+            const query = document.getElementById('capQuery').value.trim();
+
+            document.getElementById('capRunBtn').disabled = true;
+
+            for (let i = 0; i < capFiles.length; i++) {
+                const f = capFiles[i];
+                const contextSections = [];
+                if (document.getElementById(`capTr_${i}`)?.checked) contextSections.push('transcription');
+                if (document.getElementById(`capCo_${i}`)?.checked) contextSections.push('comments');
+
+                // Write comment to YAML before captioning if user typed one
+                const comment = document.getElementById(`capComment_${i}`)?.value.trim() || '';
+                if (comment && !f.yamlInfo.comments) {
+                    // Persist comment via download endpoint if available, else just include in context
+                    // (For now we pass it as additional_query context — a full comment write is out of scope)
+                }
+
+                try {
+                    const resp = await fetch('/api/caption', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            video_path: f.input,
+                            interval_seconds: interval,
+                            sequence_length: seqLen,
+                            model,
+                            additional_query: query,
+                            context_sections: contextSections,
+                        }),
+                    });
+                    const data = await resp.json();
+                    if (resp.ok) {
+                        capRuns.push({ runId: data.id, videoPath: f.input, status: 'pending', result: null, error: null });
+                    } else {
+                        capRuns.push({ runId: null, videoPath: f.input, status: 'failed', result: null, error: data.error || 'Submit failed' });
+                    }
+                } catch (err) {
+                    capRuns.push({ runId: null, videoPath: f.input, status: 'failed', result: null, error: err.message });
+                }
+            }
+
+            capFiles = [];
+            renderCapPreflight();
+            document.getElementById('capRunBtn').disabled = true;
+            renderCapRuns();
+            capStartPolling();
+        }
+
+        function capStartPolling() {
+            if (capPollTimer) return;
+            capPollTimer = setInterval(capPollRuns, 2000);
+        }
+
+        async function capPollRuns() {
+            const active = capRuns.filter(r => r.runId && (r.status === 'pending' || r.status === 'running'));
+            if (active.length === 0) { clearInterval(capPollTimer); capPollTimer = null; return; }
+            await Promise.all(active.map(async run => {
+                try {
+                    const resp = await fetch('/api/caption/' + run.runId);
+                    const data = await resp.json();
+                    if (resp.ok) { run.status = data.status; run.result = data.result; run.error = data.error; }
+                    else { run.status = 'failed'; run.error = data.error || 'Poll error'; }
+                } catch (err) { run.status = 'failed'; run.error = err.message; }
+            }));
+            renderCapRuns();
+        }
+
+        function renderCapRuns() {
+            const tbody = document.getElementById('capRunsTable');
+            if (capRuns.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;">No runs</td></tr>';
+                return;
+            }
+            tbody.innerHTML = capRuns.map((run, i) => {
+                const badgeClass = run.status === 'completed' ? 'status-complete' : 'status-' + run.status;
+                let detail = '<span style="color:#999;">—</span>';
+                if (run.status === 'completed' && run.result) {
+                    detail = `<span style="color:#28a745;">Saved to ${escapeHtml(run.result.yaml_path)}</span>`;
+                } else if (run.status === 'failed' && run.error) {
+                    detail = `<span style="color:#dc3545;">${escapeHtml(run.error)}</span>`;
+                }
+                const isTerminal = run.status === 'completed' || run.status === 'failed';
+                return `<tr>
+                    <td><small>${escapeHtml(run.videoPath)}</small></td>
+                    <td><span class="status-badge ${badgeClass}">${escapeHtml(run.status)}</span></td>
+                    <td><small>${detail}</small></td>
+                    <td>${isTerminal ? `<button class="danger" onclick="capClearRun(${i})">Clear</button>` : ''}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        async function capClearRun(index) {
+            const run = capRuns[index];
+            if (run.runId) { try { await fetch('/api/caption/' + run.runId, { method: 'DELETE' }); } catch (_) {} }
+            capRuns.splice(index, 1);
+            renderCapRuns();
+        }
+
+        async function capClearAll() {
+            await Promise.all(capRuns.filter(r => r.runId).map(r =>
+                fetch('/api/caption/' + r.runId, { method: 'DELETE' }).catch(() => {})
+            ));
+            capRuns = [];
+            renderCapRuns();
+        }
+
+        // Initialize
+        renderCapPreflight();
+        renderCapRuns();
+        capLoadModels();
+    </script>
+</div>

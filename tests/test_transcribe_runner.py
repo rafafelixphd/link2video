@@ -121,7 +121,7 @@ def test_skips_extraction_if_mp3_exists(runner, audio_runner, tmp_path):
     mock_extract.assert_not_called()
 
 
-def test_strips_whisper_noise_from_segments(runner, audio_runner, tmp_path):
+def test_forwards_full_transcription(runner, audio_runner, tmp_path):
     video = tmp_path / "v.mp4"
     video.touch()
     mp3 = tmp_path / "v.mp3"
@@ -142,9 +142,9 @@ def test_strips_whisper_noise_from_segments(runner, audio_runner, tmp_path):
         run_id = runner.start(str(video))
         time.sleep(0.3)
 
-    assert captured["text"] == "Hello world"
-    for seg in captured["segments"]:
-        assert set(seg.keys()) == {"start", "end", "text"}
+    assert captured["whisper_output"]["text"] == "Hello world"
+    assert captured["model"] == "base"
+    assert captured["device"] == "cpu"
 
 
 def test_clear_removes_entry(runner, tmp_path):

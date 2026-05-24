@@ -34,7 +34,7 @@ class TestSilenceDetector:
             # Create detector with padding=1.0
             detector = SilenceDetector(
                 input_file=tmp_path,
-                noise="-10dB",
+                threshold="-10dB",
                 duration=3.5,
                 padding=1.0
             )
@@ -84,7 +84,7 @@ class TestSilenceDetector:
         try:
             detector = SilenceDetector(
                 input_file=tmp_path,
-                noise="-10dB",
+                threshold="-10dB",
                 duration=3.5,
                 padding=0.5
             )
@@ -123,7 +123,7 @@ class TestSilenceDetector:
         try:
             detector = SilenceDetector(
                 input_file=tmp_path,
-                noise="-10dB",
+                threshold="-10dB",
                 duration=3.5,
                 padding=1.0
             )
@@ -161,7 +161,7 @@ class TestSilenceDetector:
         with pytest.raises(FileNotFoundError, match="Input file not found"):
             SilenceDetector(
                 input_file="/nonexistent/path/file.mp3",
-                noise="-10dB",
+                threshold="-10dB",
                 duration=3.5,
                 padding=1.0
             )
@@ -175,7 +175,7 @@ class TestSilenceDetector:
             with pytest.raises(ValueError, match="duration must be positive"):
                 SilenceDetector(
                     input_file=tmp_path,
-                    noise="-10dB",
+                    threshold="-10dB",
                     duration=0,
                     padding=1.0
                 )
@@ -183,7 +183,7 @@ class TestSilenceDetector:
             with pytest.raises(ValueError, match="duration must be positive"):
                 SilenceDetector(
                     input_file=tmp_path,
-                    noise="-10dB",
+                    threshold="-10dB",
                     duration=-1.5,
                     padding=1.0
                 )
@@ -199,7 +199,7 @@ class TestSilenceDetector:
             with pytest.raises(ValueError, match="padding must be non-negative"):
                 SilenceDetector(
                     input_file=tmp_path,
-                    noise="-10dB",
+                    threshold="-10dB",
                     duration=3.5,
                     padding=-0.5
                 )
@@ -220,7 +220,7 @@ class TestSilenceDetector:
         try:
             detector = SilenceDetector(
                 input_file=tmp_path,
-                noise="-10dB",
+                threshold="-10dB",
                 duration=3.5,
                 padding=1.0  # Padding of 1.0 on both sides exceeds silence duration
             )
