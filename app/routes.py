@@ -1,4 +1,6 @@
 """Flask Blueprint containing all HTTP route handlers."""
+from pathlib import Path
+
 from flask import Blueprint, current_app, jsonify, render_template, request
 
 jobs_bp = Blueprint("jobs", __name__)
@@ -12,6 +14,39 @@ def _manager():
 def index():
     """Serve main page."""
     return render_template("base.html")
+
+
+SCANNABLE_EXTENSIONS = {".mov", ".mp4"}
+
+
+@jobs_bp.route("/api/scan", methods=["GET"])
+def scan_folder():
+    """Scan a folder (flat) for .mov/.mp4 files and return pre-filled file entries."""
+    folder = request.args.get("path", "").strip()
+    if not folder:
+        return jsonify({"error": "path parameter is required"}), 400
+
+    folder_path = Path(folder)
+    if not folder_path.is_dir():
+        return jsonify({"error": f"Not a directory: {folder}"}), 400
+
+    files = []
+    for entry in sorted(folder_path.iterdir()):
+        if entry.is_file() and entry.suffix.lower() in SCANNABLE_EXTENSIONS:
+            files.append({
+                "input": str(entry),
+                "namespace": entry.stem,
+                "output_dir": str(folder_path / f"{entry.stem}-segments"),
+                "parameters": {
+                    "threshold": "-10dB",
+                    "quiet_for": 3.5,
+                    "padding": 1.0,
+                    "threads": 2,
+                    "skip_shorter": 1.5,
+                },
+            })
+
+    return jsonify({"files": files, "count": len(files)})
 
 
 @jobs_bp.route("/api/jobs", methods=["GET"])

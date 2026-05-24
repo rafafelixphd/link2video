@@ -52,3 +52,37 @@ def test_delete_nonexistent_job(client):
 def test_clear_all_jobs(client):
     resp = client.delete("/api/jobs/clear/all")
     assert resp.status_code == 200
+
+
+def test_scan_folder_no_path(client):
+    resp = client.get("/api/scan")
+    assert resp.status_code == 400
+
+
+def test_scan_folder_not_a_dir(client):
+    resp = client.get("/api/scan?path=/nonexistent/path/xyz")
+    assert resp.status_code == 400
+
+
+def test_scan_folder_finds_files(client, tmp_path):
+    (tmp_path / "clip.mp4").touch()
+    (tmp_path / "interview.mov").touch()
+    (tmp_path / "notes.txt").touch()   # should be ignored
+
+    resp = client.get(f"/api/scan?path={tmp_path}")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["count"] == 2
+    names = {f["namespace"] for f in data["files"]}
+    assert names == {"clip", "interview"}
+    # output_dir follows {stem}-segments convention
+    for f in data["files"]:
+        assert f["output_dir"].endswith(f["namespace"] + "-segments")
+
+
+def test_scan_folder_empty(client, tmp_path):
+    resp = client.get(f"/api/scan?path={tmp_path}")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["count"] == 0
+    assert data["files"] == []
