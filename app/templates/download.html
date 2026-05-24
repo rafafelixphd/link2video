@@ -37,7 +37,7 @@
             </label>
         </div>
 
-        <button onclick="startDownload()" style="background: #28a745;">⬇ Download</button>
+        <button id="dlBtn" onclick="startDownload()" style="background: #28a745;">⬇ Download</button>
     </div>
 
     <!-- Status Section -->
@@ -58,6 +58,14 @@
     <script>
         let dlRunId = null;
         let dlPollInterval = null;
+        let dlPollErrors = 0;
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            const d = document.createElement('div');
+            d.textContent = str;
+            return d.innerHTML;
+        }
 
         async function startDownload() {
             const url = document.getElementById('dlUrl').value.trim();
@@ -67,6 +75,8 @@
 
             if (!url) { alert('URL is required'); return; }
             if (!savePath) { alert('Output directory is required'); return; }
+
+            document.getElementById('dlBtn').disabled = true;
 
             const tags = tagsRaw
                 ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean)
@@ -84,24 +94,40 @@
                 renderStatus('pending', null, null);
                 startDlPolling();
             } catch (err) {
+                document.getElementById('dlBtn').disabled = false;
                 alert('Error: ' + err.message);
             }
         }
 
         function startDlPolling() {
+            dlPollErrors = 0;
             if (dlPollInterval) clearInterval(dlPollInterval);
             dlPollInterval = setInterval(async () => {
                 if (!dlRunId) return;
                 try {
                     const resp = await fetch('/api/download/' + dlRunId);
                     const data = await resp.json();
+                    if (!resp.ok) {
+                        renderStatus('failed', null, 'Server error: ' + (data.error || resp.status));
+                        clearInterval(dlPollInterval);
+                        dlPollInterval = null;
+                        document.getElementById('dlBtn').disabled = false;
+                        return;
+                    }
                     renderStatus(data.status, data.result, data.error);
                     if (data.status === 'completed' || data.status === 'failed') {
                         clearInterval(dlPollInterval);
                         dlPollInterval = null;
+                        document.getElementById('dlBtn').disabled = false;
                     }
                 } catch (err) {
-                    console.error('Poll error:', err);
+                    dlPollErrors++;
+                    if (dlPollErrors >= 5) {
+                        clearInterval(dlPollInterval);
+                        dlPollInterval = null;
+                        document.getElementById('dlBtn').disabled = false;
+                        renderStatus('failed', null, 'Connection lost. Reload and try again.');
+                    }
                 }
             }, 2000);
         }
@@ -112,15 +138,15 @@
             const badgeClass = status === 'completed' ? 'status-complete' : 'status-' + status;
             let detail = '<span style="color: #999;">—</span>';
             if (status === 'completed' && result) {
-                detail = '<span style="color: #28a745;">' + result + '</span>';
+                detail = '<span style="color: #28a745;">' + escapeHtml(result) + '</span>';
             } else if (status === 'failed' && error) {
-                detail = '<span style="color: #dc3545;">' + error + '</span>';
+                detail = '<span style="color: #dc3545;">' + escapeHtml(error) + '</span>';
             }
 
             const isTerminal = status === 'completed' || status === 'failed';
             document.getElementById('dlStatusBody').innerHTML = `
                 <tr>
-                    <td><span class="status-badge ${badgeClass}">${status}</span></td>
+                    <td><span class="status-badge ${badgeClass}">${escapeHtml(status)}</span></td>
                     <td><small>${detail}</small></td>
                     <td>${isTerminal ? '<button class="danger" onclick="clearDlStatus()">Clear</button>' : ''}</td>
                 </tr>
@@ -133,6 +159,7 @@
                 dlRunId = null;
             }
             if (dlPollInterval) { clearInterval(dlPollInterval); dlPollInterval = null; }
+            document.getElementById('dlBtn').disabled = false;
             document.getElementById('dlStatusSection').style.display = 'none';
             document.getElementById('dlStatusBody').innerHTML = '';
         }
