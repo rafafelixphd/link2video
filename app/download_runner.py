@@ -39,9 +39,10 @@ class DownloadRunner:
                 return
             self._runs[run_id]["status"] = "running"
         try:
-            Path(save_path).expanduser().mkdir(parents=True, exist_ok=True)
+            expanded_path = str(Path(save_path).expanduser())
+            Path(expanded_path).mkdir(parents=True, exist_ok=True)
             downloader = detect_platform(url)
-            success, result = downloader.download(url, save_path, tags=tags, comments=comments)
+            success, result = downloader.download(url, expanded_path, tags=tags, comments=comments)
             with self._lock:
                 if run_id not in self._runs:
                     return

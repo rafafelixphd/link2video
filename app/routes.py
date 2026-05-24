@@ -123,6 +123,8 @@ def start_download():
     if not save_path:
         return jsonify({"error": "save_path is required"}), 400
     tags = data.get("tags") or []
+    if not isinstance(tags, list):
+        tags = []
     comments = data.get("comments") or ""
     run_id = _download_runner().start(url, save_path, tags, comments)
     return jsonify({"id": run_id}), 201
