@@ -218,6 +218,11 @@ def test_delete_audio(client_with_runners):
 
 
 # Transcribe routes
+def test_post_transcribe_no_body(client_with_runners):
+    resp = client_with_runners.post("/api/transcribe")
+    assert resp.status_code == 400
+
+
 def test_post_transcribe_missing_video_path(client_with_runners):
     resp = client_with_runners.post("/api/transcribe", json={})
     assert resp.status_code == 400
